@@ -1,0 +1,22 @@
+services:
+  simulador:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # O cliente usa localhost para chegar ao CoppeliaSim. A rede do host também
+    # elimina a necessidade de publicar a porta do servidor ZeroMQ (23000).
+    network_mode: host
+    environment:
+      DISPLAY: ${DISPLAY}
+      QT_QPA_PLATFORM: xcb
+      MPLBACKEND: TkAgg
+      MPLCONFIGDIR: /tmp/matplotlib
+    # Evita criar logs e arquivos de cache como root no diretório do projeto.
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      # Código-fonte: alterações locais aparecem imediatamente no contêiner.
+      - ./simulador:/workspace/simulador
+      # Socket do servidor X11 do host, necessário para a janela do Matplotlib.
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    stdin_open: true
+    tty: true
