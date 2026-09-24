@@ -4,48 +4,33 @@
 # Professores: Armando Alves Neto e Leonardo A. Mozelli
 # Cursos: Engenharia de Controle e Automação
 # DELT – Escola de Engenharia
-# Universidade Federal de Minas Gerais
 ########################################
 from fva_car import Car
 import numpy as np
 import os
-os.environ["QT_QPA_PLATFORM"] = "xcb"
+import matplotlib
+matplotlib.use("QtAgg")
 import matplotlib.pyplot as plt
 plt.rcParams['figure.figsize'] = (6,8)
 
-# Globais
+SET_VEL = 1.0
+integral = 0.0
+
 parameters = {	
-				'ts'		: 10.0, 			# tempo da simulacao
+				'ts'		: 20.0,
 				'save'		: True,
 				'logfile'	: 'logs/',
 				'beep'		: True,
 			}
-	
-########################################
-# thread de controle de velocidade
-########################################
-def control_func(car):
-		
-	# seta direcao
-	car.set_steer(np.deg2rad(5.0*np.sin(car.t)))
 
-	# atua
-	if car.t < 5.0:
-		car.set_u(0.3)
-	else:
-		car.set_u(0.0)
-		
 ########################################
 # thread de visão
 ########################################
 def vision_func(car):
 		
-	# pega imagem
 	image = car.get_image(gray=False)
 	
-	# ultrasom
 	dist, _ = car.get_distance()
-	#print(f'Ultrasonic distance: {dist:.1f}')
 	
 	return image
 				
@@ -57,32 +42,34 @@ if __name__ == "__main__":
 	plt.figure(1)
 	plt.ion()
 	
-	# cria comunicação com o carrinho
 	car = Car(parameters)
 	
 	try:
-		# começa a simulação
 		car.start_mission()
-
-		# main loop
+		ref_filtrada = 0.0
+		tau = 0.8
 		while car.t <= parameters['ts']:
 			
-			# lê senores
 			car.step()
-			
-			# funcao de controle
-			control_func(car)
-			
-			# funcao de visao
-			image = vision_func(car)
-			
-			########################################
-			# plota	
+			ref_filtrada = ref_filtrada + (car.dt / tau) * (SET_VEL - ref_filtrada)
+
+			v, w = car.get_vel()
+			# erro = SET_VEL - v
+			erro = ref_filtrada - v
+
+			integral = integral + erro * car.dt
+			prop = 12 * erro
+			i = 5 * integral
+			tot = prop + i
+
+			car.set_u(tot)
+
+			print(f'Velocidade: {v:.2f} m/s, Controle: {tot:.2f}, Erro: {erro:.2f}, Integral: {integral:.2f}')
+
 			plt.subplot(211)
 			plt.cla()
-			plt.gca().imshow(image, cmap='gray')
 			plt.axis('off')
-			plt.title(f'Telemetria em t={car.t:.1f}s')
+			plt.title(f'Telemetria em t={car.t:.1f}s velocidade={car.get_vel()[0]:.2f} m/s')
 			
 			plt.subplot(212)
 			plt.cla()
@@ -95,12 +82,8 @@ if __name__ == "__main__":
 			plt.show()
 			plt.pause(0.01)
 
-		# salva
 		if parameters['save']:
 			car.save()
-	
-	except KeyboardInterrupt:
-		print("\nMissao interrompida pelo usuario.")
-		
+			
 	finally:
 		car.close()
