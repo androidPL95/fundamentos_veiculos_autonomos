@@ -336,7 +336,7 @@ class Car:
 		self.u = np.clip(u, -CAR['ACCELMAX'], CAR['ACCELMAX'])
 		
 		# atrito sempre contrario ao movimento
-		F_friction = -np.sign(self.v)*CAR['MASS']*CAR['GRAV']*CAR['MI']
+		F_friction = -np.sign(self.v)*CAR['MASS']*CAR['GRAV']*CAR['MI']*0.0
 
 		# força de controle
 		F_control = CAR['MASS']*self.u
