@@ -6,40 +6,43 @@
 # DELT – Escola de Engenharia
 # Universidade Federal de Minas Gerais
 ########################################
-import class_car as cp
+from fva_car import Car
 import numpy as np
 import os
 os.environ["QT_QPA_PLATFORM"] = "xcb"
 import matplotlib.pyplot as plt
-plt.rcParams['figure.figsize'] = (10,10)
+plt.rcParams['figure.figsize'] = (6,8)
 
 # Globais
 parameters = {	
 				'ts'		: 20.0, 			# tempo da simulacao
 				'save'		: True,
 				'logfile'	: 'logs/',
+				'beep'		: True,
 			}
 
 SET_VEL = 1.0
 
-# Rx = -0.0931
+#Rx = -0.0931
 	
 ########################################
 # thread de controle de velocidade
 ########################################
-def control_func(car, integral):
-		
+def control_func(car, integral, ref_filtrada, tau):
+
+	ref_filtrada = ref_filtrada + (car.dt / tau) * (SET_VEL - ref_filtrada)
+
+	
 	v, w = car.get_vel()
-	erro = SET_VEL - v
+	erro = ref_filtrada - v
 	integral = integral + erro*car.dt
-	prop = 10 * erro
-	i = 0.1 * integral
+	prop = 10.0 * erro
+	i = 5.0 * integral
 	tot = prop + i
 	# Controlador PI: o total antes da saturacao mostra as duas contribuicoes
 	car.set_u(tot)
 
-	return integral, prop, i, tot
-
+	return integral, prop, i, tot, ref_filtrada
 		
 ########################################
 # thread de visão
@@ -60,28 +63,30 @@ def vision_func(car):
 ########################################
 if __name__ == "__main__":
 	
-	plt.figure(1, figsize=(10, 15))
+	plt.figure(1)
 	plt.ion()
 	
 	# cria comunicação com o carrinho
-	car = cp.Car(parameters)
-
-	integral = 0
-
-	control_params = []
+	car = Car(parameters)
 	
 	try:
 		# começa a simulação
 		car.start_mission()
+
+		integral = 0
+		ref_filtrada = 0.0
+		tau = 0.8
+
+		control_params = []
 
 		# main loop
 		while car.t <= parameters['ts']:
 			
 			# lê senores
 			car.step()
-			
+						
 			# funcao de controle
-			integral, prop, i, tot = control_func(car, integral)
+			integral, prop, i, tot, ref_filtrada = control_func(car, integral, ref_filtrada, tau)
 
 			data = {"t": car.t, "p": prop, "i": i, "tot": tot}
 			control_params.append(data)
@@ -101,6 +106,7 @@ if __name__ == "__main__":
 			t = [traj['t'] for traj in car.traj]
 			v = [traj['v'] for traj in car.traj]
 			plt.plot(t,v)
+			plt.axhline(1.0, color="green", linestyle="--")
 			plt.ylabel('v[m/s]')
 			plt.xlabel('t[s]')
 
@@ -113,6 +119,7 @@ if __name__ == "__main__":
 			plt.plot(t_control, p, label='P', color='red')
 			plt.plot(t_control, i, label='I')
 			plt.plot(t_control, tot, label='PI')
+			plt.axhline(0.0, color="green", linestyle="--")
 			plt.ylabel('u')
 			plt.xlabel('t[s]')
 			plt.legend()
@@ -125,6 +132,9 @@ if __name__ == "__main__":
 		# salva
 		if parameters['save']:
 			car.save()
-			
+	
+	except KeyboardInterrupt:
+		print("\nMissao interrompida pelo usuario.")
+		
 	finally:
 		car.close()

@@ -335,8 +335,14 @@ class Car:
 		# limita aceleracao
 		self.u = np.clip(u, -CAR['ACCELMAX'], CAR['ACCELMAX'])
 		
+		# magnitude da velocidade
+		v_abs = abs(self.v)
+
+		# compensacao da forca de atrito
+		s = np.tanh(10.0*v_abs)
+		
 		# atrito sempre contrario ao movimento
-		F_friction = -np.sign(self.v)*CAR['MASS']*CAR['GRAV']*CAR['MI']
+		F_friction = s*CAR['MASS']*CAR['GRAV']*CAR['MI']
 
 		# força de controle
 		F_control = CAR['MASS']*self.u
