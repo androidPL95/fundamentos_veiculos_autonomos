@@ -16,6 +16,30 @@ import time
 
 MAIN_VEL = 0.7
 
+SET_VEL = 1.0
+
+#Rx = -0.0931
+	
+########################################
+# thread de controle de velocidade
+########################################
+def control_func(car, integral, ref_filtrada, tau):
+
+	ref_filtrada = ref_filtrada + (car.dt / tau) * (SET_VEL - ref_filtrada)
+
+	
+	v, w = car.get_vel()
+	erro = ref_filtrada - v
+	integral = integral + erro*car.dt
+	prop = 10.0 * erro
+	i = 5.0 * integral
+	tot = prop + i
+	# Controlador PI: o total antes da saturacao mostra as duas contribuicoes
+	car.set_u(tot)
+
+	return integral, prop, i, tot, ref_filtrada
+
+
 ########################################
 # thread de visao
 def vision_func(car, vision_data, stop_event):
@@ -84,6 +108,10 @@ if __name__ == "__main__":
 
 		t_plot = time.monotonic()
 
+		integral = 0
+		ref_filtrada = 0.0
+		tau = 0.8
+
 		# controle fica na thread principal
 		while car.t < parameters['ts']:
 
@@ -91,17 +119,19 @@ if __name__ == "__main__":
 			if not car.step():
 				break
 
-			# direcao
-			car.set_steer(vision_data["refste"])
+			# # direcao
+			# car.set_steer(vision_data["refste"])
 
-			# ultrassom
-			dist, valid = car.get_distance()
+			# # ultrassom
+			# dist, valid = car.get_distance()
 
-			if (not valid) or (dist < 0.20):
-				print(f"Colisao: distance {dist:.2f} [m]")
-				car.set_vel(0.0)
-			else:
-				car.set_vel(MAIN_VEL)
+			# if (not valid) or (dist < 0.20):
+			# 	print(f"Colisao: distance {dist:.2f} [m]")
+			# 	car.set_vel(0.0)
+			# else:
+			# 	car.set_vel(MAIN_VEL)
+
+			integral, prop, i, tot, ref_filtrada = control_func(car, integral, ref_filtrada, tau)
 
 			# telemetria para plots remotos
 			print(
