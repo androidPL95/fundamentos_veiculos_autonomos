@@ -169,7 +169,8 @@ class Servos:
 			with self.lock:
 				if self.gear == Gear.FORWARD:
 					# envia comando de tracao (integra pwm)
-					self.th_pwm += self.dth_pwm * self.dt
+					# self.th_pwm += self.dth_pwm * self.dt
+					self.th_pwm = self.dth_pwm
 					# limita tracao com anti-windup
 					self.th_pwm = np.clip(self.th_pwm, 0.0, self.max_throttle)
 				#
