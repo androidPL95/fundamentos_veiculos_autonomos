@@ -8,13 +8,16 @@
 # Universidade Federal de Minas Gerais
 ########################################
 # -*- coding: utf-8 -*-
-from fva_car import Car
+from fva_car import AUTOMATIC, Car, PID
 import numpy as np
 import matplotlib.pyplot as plt
 import threading
 import time
 
-MAIN_VEL = 0.7
+PID_KP = 0.5
+PID_KI = 0.0
+PID_KD = 0.0
+REFERENCE_SPEED = 1.0
 
 ########################################
 # thread de visao
@@ -68,6 +71,18 @@ if __name__ == "__main__":
 	try:
 		car.start_mission()
 
+		speed_pid = PID(
+			PID_KP,
+			PID_KI,
+			PID_KD,
+			sample_time=car.sample_rate,
+			output_limits=(-1.0, 1.0),
+			setpoint=REFERENCE_SPEED,
+			input_value=car.v,
+			output=0.0
+		)
+		speed_pid.set_mode(AUTOMATIC)
+
 		# inicia visao somente se solicitada
 		if parameters['camera']:
 			thread_vision = threading.Thread(
@@ -96,11 +111,16 @@ if __name__ == "__main__":
 			# ultrassom
 			dist, valid = car.get_distance()
 
-			if (not valid) or (dist < 0.20):
+			#if (not valid) or (dist < 0.20) or car.t > 10.0:
+			if car.t > 10.0:
 				print(f"Colisao: distance {dist:.2f} [m]")
-				car.set_vel(0.0)
+				speed_pid.reset(input_value=car.v, output=0.0)
+				car.vref = 0.0
+				car.set_u(0.0)
 			else:
-				car.set_vel(MAIN_VEL)
+				speed_pid.compute(car.v, REFERENCE_SPEED, now=car.t)
+				car.vref = REFERENCE_SPEED
+				car.set_u(speed_pid.output)
 
 			# telemetria para plots remotos
 			print(
