@@ -53,9 +53,11 @@ def emergency_brake(car, u):
 ########################################
 def ADAS(car,u):
 	dist, valid = car.get_distance()
-	car.get_ac
 	
 	delta_d = dist - d_ant
+	if valid and delta_d < -0.2:
+		for i in range(3):
+			car.bz.beep(0.1)
 	if valid and delta_d < -0.5:
 		car.set_u(0.0)
 		print(f"ADAS activated! Distance: {dist:.2f} m, Delta: {delta_d:.2f} m")
