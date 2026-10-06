@@ -1,1 +1,4 @@
 simulador/logs/*
+.venv/*
+**/__pycache__/*
+experimentos/*
