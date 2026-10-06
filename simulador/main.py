@@ -13,6 +13,8 @@ matplotlib.use("QtAgg")
 import matplotlib.pyplot as plt
 plt.rcParams['figure.figsize'] = (6,8)
 
+BRAKE_DIST = 2.0
+
 SET_VEL = 1.0
 integral = 0.0
 
@@ -33,6 +35,13 @@ def vision_func(car):
 	dist, _ = car.get_distance()
 	
 	return image
+
+def emergency_brake(car):
+	dist, valid = car.get_distance()
+	if valid and dist < BRAKE_DIST:
+		car.set_u(0.0)
+		print(f"Emergency brake activated! Distance: {dist:.2f} m")
+
 				
 ########################################
 # main program
@@ -51,6 +60,7 @@ if __name__ == "__main__":
 		while car.t <= parameters['ts']:
 			
 			car.step()
+			car.set_steer(0.0)
 			ref_filtrada = ref_filtrada + (car.dt / tau) * (SET_VEL - ref_filtrada)
 
 			v, w = car.get_vel()
@@ -64,7 +74,7 @@ if __name__ == "__main__":
 
 			car.set_u(tot)
 
-			print(f'Velocidade: {v:.2f} m/s, Controle: {tot:.2f}, Erro: {erro:.2f}, Integral: {integral:.2f}')
+			# print(f'Velocidade: {v:.2f} m/s, Controle: {tot:.2f}, Erro: {erro:.2f}, Integral: {integral:.2f}')
 
 			plt.subplot(211)
 			plt.cla()

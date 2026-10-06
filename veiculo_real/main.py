@@ -16,7 +16,52 @@ import time
 
 MAIN_VEL = 0.7
 
+SET_VEL = 1.0
+
+d_ant = 0.0
+
+#Rx = -0.0931
+	
 ########################################
+# thread de controle de velocidade
+########################################
+def control_func(car, integral, ref_filtrada, tau):
+
+	ref_filtrada = ref_filtrada + (car.dt / tau) * (SET_VEL - ref_filtrada)
+
+	
+	v, w = car.get_vel()
+	erro = ref_filtrada - v
+	integral = integral + erro*car.dt
+	prop = 10.0 * erro
+	i = 5.0 * integral
+	tot = prop + i
+	# Controlador PI: o total antes da saturacao mostra as duas contribuicoes
+	# car.set_u(tot)
+ 
+	emergency_brake(car, tot)
+
+	return integral, prop, i, tot, ref_filtrada
+
+def emergency_brake(car, u):
+	dist, valid = car.get_distance()
+	if valid and dist < 2.0:
+		car.set_u(0.0)
+		print(f"Emergency brake activated! Distance: {dist:.2f} m")
+	else:
+		car.set_u(u)
+########################################
+def ADAS(car,u):
+	dist, valid = car.get_distance()
+	car.get_ac
+	
+	delta_d = dist - d_ant
+	if valid and delta_d < -0.5:
+		car.set_u(0.0)
+		print(f"ADAS activated! Distance: {dist:.2f} m, Delta: {delta_d:.2f} m")
+	else:
+		car.set_u(u)
+	d_ant = dist
 # thread de visao
 def vision_func(car, vision_data, stop_event):
 
@@ -49,15 +94,14 @@ def vision_func(car, vision_data, stop_event):
 ########################################
 if __name__ == "__main__":
 
-	parameters = {
-		'ts'                   : 20.0,
-		'save'                 : True,
-		'logfile'              : 'logs/',
-		'camera'               : False,
-		'ultrasonic_steering'  : False,
-		'us_buzzer'            : False,
-		'initial_position'     : [0, 0, np.deg2rad(0)]
-	}
+	parameters = {	
+				'ts'					: 20.0, 	# tempo da execucao
+				'save'					: True,		# salva dados da trajetoria
+				'logfile'				: 'logs/',	# log file
+				'camera'				: False,	# habilitar camera e thread de visao
+				'us_buzzer'				: True,		# aviso sonoro para objetos proximos
+				'initial_position'		: [0, 0, np.deg2rad(0)]	# (x, y, theta) configuracao inicial
+			}
 
 	car = Car(parameters)
 	
@@ -84,6 +128,10 @@ if __name__ == "__main__":
 
 		t_plot = time.monotonic()
 
+		integral = 0
+		ref_filtrada = 0.0
+		tau = 0.8
+
 		# controle fica na thread principal
 		while car.t < parameters['ts']:
 
@@ -91,30 +139,32 @@ if __name__ == "__main__":
 			if not car.step():
 				break
 
-			# direcao
-			car.set_steer(vision_data["refste"])
+			# # direcao
+			# car.set_steer(vision_data["refste"])
 
-			# ultrassom
-			dist, valid = car.get_distance()
+			# # ultrassom
+			# dist, valid = car.get_distance()
 
-			if (not valid) or (dist < 0.20):
-				print(f"Colisao: distance {dist:.2f} [m]")
-				car.set_vel(0.0)
-			else:
-				car.set_vel(MAIN_VEL)
+			# if (not valid) or (dist < 0.20):
+			# 	print(f"Colisao: distance {dist:.2f} [m]")
+			# 	car.set_vel(0.0)
+			# else:
+			# 	car.set_vel(MAIN_VEL)
+
+			integral, prop, i, tot, ref_filtrada = control_func(car, integral, ref_filtrada, tau)
 
 			# telemetria para plots remotos
 			print(
 				f"DATA,"
-				f"{car.t:.3f},"
-				f"{car.p[0]:.3f},"
-				f"{car.p[1]:.3f},"
-				f"{car.v:.3f},"
-				f"{car.vref:.3f},"
-				f"{car.a:.3f},"
-				f"{car.u:.3f},"
-				f"{car.w:.3f},"
-				f"{car.th:.3f}",
+				f"{car.t:.2f},"
+				f"{car.p[0]:.2f},"
+				f"{car.p[1]:.2f},"
+				f"{car.v:.2f},"
+				f"{car.vref:.2f},"
+				f"{car.a:.2f},"
+				f"{car.u:.2f},"
+				f"{car.w:.2f},"
+				f"{car.th:.2f}",
 				flush=True
 			)
 
