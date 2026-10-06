@@ -15,6 +15,7 @@ import threading
 import time
 
 MAIN_VEL = 0.7
+primeira_execucao = False 
 
 SET_VEL = 1.0
 
@@ -90,6 +91,24 @@ def vision_func(car, vision_data, stop_event):
 		cx = point[0] - W/2
 
 		vision_data["refste"] = -np.deg2rad(20.0*cx/(W/2))
+  
+def ADAS(car,u):
+	dist, valid = car.get_distance()
+	if not primeira_execucao:
+		car.set_u(u)
+	primeira_execucao = True
+	delta_d = dist - d_ant
+	if valid and delta_d < -0.2:
+		for i in range(3):
+			car.bz.beep(0.1)
+	if valid and delta_d < -0.5:
+		car.set_u(0.0)
+		print(f"ADAS activated! Distance: {dist:.2f} m, Delta: {delta_d:.2f} m")
+	else:
+		car.set_u(u)
+	d_ant = dist
+ 
+# thread de visao
 		
 ########################################
 # main
@@ -144,8 +163,10 @@ if __name__ == "__main__":
 			# # direcao
 			# car.set_steer(vision_data["refste"])
 
-			# # ultrassom
-			# dist, valid = car.get_distance()
+			ADAS(car, 1.0)
+
+			# ultrassom
+			dist, valid = car.get_distance()
 
 			# if (not valid) or (dist < 0.20):
 			# 	print(f"Colisao: distance {dist:.2f} [m]")
