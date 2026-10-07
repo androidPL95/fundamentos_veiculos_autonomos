@@ -16,6 +16,7 @@ import time
 
 MAIN_VEL = 0.7
 primeira_execucao = False 
+primeira_execucao = False 
 
 SET_VEL = 1.0
 
@@ -163,10 +164,8 @@ if __name__ == "__main__":
 			# # direcao
 			# car.set_steer(vision_data["refste"])
 
-			ADAS(car, 1.0)
-
-			# ultrassom
-			dist, valid = car.get_distance()
+			# # ultrassom
+			# dist, valid = car.get_distance()
 
 			# if (not valid) or (dist < 0.20):
 			# 	print(f"Colisao: distance {dist:.2f} [m]")
