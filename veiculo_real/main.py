@@ -15,12 +15,8 @@ import threading
 import time
 
 MAIN_VEL = 0.7
-primeira_execucao = False 
-primeira_execucao = False 
 
 SET_VEL = 1.0
-
-d_ant = 0.0
 
 #Rx = -0.0931
 	
@@ -39,33 +35,12 @@ def control_func(car, integral, ref_filtrada, tau):
 	i = 5.0 * integral
 	tot = prop + i
 	# Controlador PI: o total antes da saturacao mostra as duas contribuicoes
-	# car.set_u(tot)
- 
-	emergency_brake(car, tot)
+	car.set_u(tot)
 
 	return integral, prop, i, tot, ref_filtrada
 
-def emergency_brake(car, u):
-	dist, valid = car.get_distance()
-	if valid and dist < 2.0:
-		car.set_u(0.0)
-		print(f"Emergency brake activated! Distance: {dist:.2f} m")
-	else:
-		car.set_u(u)
+
 ########################################
-def ADAS(car,u):
-	dist, valid = car.get_distance()
-	
-	delta_d = dist - d_ant
-	if valid and delta_d < -0.2:
-		for i in range(3):
-			car.bz.beep(0.1)
-	if valid and delta_d < -0.5:
-		car.set_u(0.0)
-		print(f"ADAS activated! Distance: {dist:.2f} m, Delta: {delta_d:.2f} m")
-	else:
-		car.set_u(u)
-	d_ant = dist
 # thread de visao
 def vision_func(car, vision_data, stop_event):
 
@@ -92,24 +67,6 @@ def vision_func(car, vision_data, stop_event):
 		cx = point[0] - W/2
 
 		vision_data["refste"] = -np.deg2rad(20.0*cx/(W/2))
-  
-def ADAS(car,u):
-	dist, valid = car.get_distance()
-	if not primeira_execucao:
-		car.set_u(u)
-	primeira_execucao = True
-	delta_d = dist - d_ant
-	if valid and delta_d < -0.2:
-		for i in range(3):
-			car.bz.beep(0.1)
-	if valid and delta_d < -0.5:
-		car.set_u(0.0)
-		print(f"ADAS activated! Distance: {dist:.2f} m, Delta: {delta_d:.2f} m")
-	else:
-		car.set_u(u)
-	d_ant = dist
- 
-# thread de visao
 		
 ########################################
 # main
