@@ -1,94 +1,81 @@
+
 # -*- coding: utf-8 -*-
-# Disciplina: Tópicos em Engenharia de Controle e Automação IV (ENG075): 
-# Fundamentos de Veículos Autônomos - 2026/1
+# Disciplina: Tópicos em Engenharia de Controle e Automação IV (ENG075)
+# Fundamentos de Veículos Autônomos - 2026/2
 # Professores: Armando Alves Neto e Leonardo A. Mozelli
-# Cursos: Engenharia de Controle e Automação
-# DELT – Escola de Engenharia
+# DELT - Escola de Engenharia
 # Universidade Federal de Minas Gerais
 ########################################
+
+from cv2 import integral
+
 from fva_car import Car
 import numpy as np
-import os
 import matplotlib
-matplotlib.use("QtAgg")
-import matplotlib.pyplot as plt
-plt.rcParams['figure.figsize'] = (6,8)
+from collections import deque
 
-# Globais
-parameters = {	
-				'ts'		: 15.0, 			# tempo da simulacao
-				'save'		: True,
-				'logfile'	: 'logs/',
-				'beep'		: True,
-			}
+matplotlib.use("QtAgg")
+
+import matplotlib.pyplot as plt
+
+plt.rcParams["figure.figsize"] = (6, 8)
+
+
+# ============================================================
+# PARÂMETROS GERAIS
+# ============================================================
+
+parameters = {
+    "ts": 15.0,
+    "save": True,
+    "logfile": "logs/",
+    "beep": True,
+}
 
 SET_VEL = 1.0
+historico_d = deque(maxlen=5)
+AEB_LATCHED = False
 
-#Rx = -0.0931
-	
-########################################
-# thread de controle de velocidade
-########################################
+# ============================================================
+# ADAS: FCW + AEB
+# O ADAS DEFINE SOMENTE O SETPOINT DE VELOCIDADE.
+# Ele NÃO chama car.set_u().
+# ============================================================
 
-def control_func(car, integral, ref_filtrada, tau, estado_adas):
-
-    ref_filtrada += (car.dt / tau) * (SET_VEL - ref_filtrada)
-
-    v, w = car.get_vel()
-    erro = ref_filtrada - v
-
-    prop = 10 * erro
-
-    # Não acumula integral durante o AEB
-    if estado_adas["aeb_latched"]:
-        integral = 0.0
-    else:
-        integral += erro * car.dt
-
-    i = 5 * integral
-    tot = prop + i
-
-    adas_u, adas_estado = adas_fcw_aeb(
-        car, tot, estado_adas
-    )
-
-    if adas_estado == "AEB":
-        print("AEB: tração cortada!")
-    elif adas_estado == "FCW":
-        print("FCW: obstáculo à frente!")
-    elif adas_estado == "LIBERADO":
-        print("Obstáculo removido. Liberando controle.")
-
-    return integral, prop, i, adas_u, ref_filtrada
-
-
-
-
-def adas_fcw_aeb(car, u, estado_adas):
+def adas_fcw_aeb(car, estado_adas):
     """
-    AEB travado até que:
-      1. O obstáculo seja removido;
-      2. O veículo esteja praticamente parado.
+    Retorna:
+        setpoint: referência de velocidade definida pelo ADAS
+        estado: estado atual do ADAS
 
-    Enquanto isso, u = 0.
+    Estados:
+        CRUISE   - operação normal
+        FCW      - alerta de colisão
+        AEB      - frenagem automática solicitada pelo setpoint zero
+        LIBERADO - obstáculo removido e veículo parado
     """
 
+    # Parâmetros de segurança
     A_CD = 0.104
     ATRASO = 0.10
     MARGEM = 0.20
     MARGEM_FCW = 1.0
 
-    D_LIVRE = 3.8       # distância que indica caminho livre [m]
-    V_PARADO = 0.03     # tolerância de velocidade [m/s]
-    N_LEITURAS = 10     # leituras consecutivas de caminho livre
+    D_LIVRE = 3.9
+    V_PARADO = 0.03
+    N_LEITURAS = 20
 
+    # Leitura dos sensores
     d, _ = car.get_distance()
     v, _ = car.get_vel()
 
-    # Se o AEB estiver travado, não permite aceleração
+    # --------------------------------------------------------
+    # AEB TRAVADO
+    # Só libera quando o obstáculo for removido E o carro parar
+    # --------------------------------------------------------
+
     if estado_adas["aeb_latched"]:
 
-        # Confirma que o obstáculo foi removido
         if d is not None and float(d) >= D_LIVRE:
             estado_adas["clear_count"] += 1
         else:
@@ -99,71 +86,197 @@ def adas_fcw_aeb(car, u, estado_adas):
         )
 
         velocidade_zero = (
-            v is not None and abs(float(v)) <= V_PARADO
+            v is not None
+            and abs(float(v)) <= V_PARADO
         )
 
-        # Só libera quando as DUAS condições forem satisfeitas
         if obstaculo_removido and velocidade_zero:
             estado_adas["aeb_latched"] = False
             estado_adas["clear_count"] = 0
-            car.set_u(0.0)
-            return 0.0, "LIBERADO"
 
-        # Continua cortando a tração
-        car.set_u(0.0)
+            return SET_VEL, "LIBERADO"
+
+        # Mantém o setpoint em zero enquanto o AEB estiver travado
         return 0.0, "AEB"
 
-    # Proteção para leituras inválidas
+    # --------------------------------------------------------
+    # PROTEÇÃO CONTRA LEITURAS INVÁLIDAS
+    # --------------------------------------------------------
+
     if d is None or v is None:
-        car.set_u(0.0)
-        return 0.0, "SENSOR_INVALIDO"
+        estado_adas["aeb_latched"] = True
+        estado_adas["clear_count"] = 0
+
+        return 0.0, "AEB"
 
     d = float(d)
     v = max(0.0, float(v))
 
-    # Distâncias dinâmicas de atuação
-    d_stop = v**2 / (2.0 * A_CD)
-    d_aeb = d_stop + v * ATRASO + MARGEM
+    # --------------------------------------------------------
+    # CÁLCULO DAS DISTÂNCIAS DE SEGURANÇA
+    # --------------------------------------------------------
+
+    d_stop = (v ** 2) / (2.0 * A_CD)
+
+    d_aeb = (
+        d_stop
+        + v * ATRASO
+        + MARGEM
+    )
+
     d_fcw = d_aeb + MARGEM_FCW
-    
-    print(f"Distancia para parar: {d_stop:.2f}")
+
+    # --------------------------------------------------------
+    # AEB: SETPOINT ZERO
+    # --------------------------------------------------------
 
     if d <= d_aeb:
+
         estado_adas["aeb_latched"] = True
         estado_adas["clear_count"] = 0
-        car.set_u(0.0)
+
         return 0.0, "AEB"
 
-    elif d <= d_fcw:
-        car.set_u(u)
-        return u, "FCW"
+    # --------------------------------------------------------
+    # FCW: ALERTA, SEM ALTERAR O SETPOINT
+    # --------------------------------------------------------
 
-    car.set_u(u)
-    return u, "CRUISE"
+    elif d <= d_fcw:
+
+        return SET_VEL, "FCW"
+
+    # --------------------------------------------------------
+    # CONDUÇÃO NORMAL
+    # --------------------------------------------------------
+
+    return SET_VEL, "CRUISE"
+    
+    
+
+
+def adas(car, setpoint):
+    global AEB_LATCHED
+    v = car.get_vel()[0]
+    d = car.get_distance()[0]
+    
+    
+    historico_d.append(d)
+    d = sum(historico_d) / len(historico_d)
+    print(f"distancia media {d: .2f}")
+    
+    if AEB_LATCHED and d <= 3.8:
+        print("latched")
+        return 0.0
+    
+    if d > 3.8:
+        AEB_LATCHED = False
+        print("liberado")
+        return setpoint
+    
+    d_stop = (v**2) * 3.0
+    d_aeb = d_stop + 0.5
+    d_fcw = d_aeb + 1.0
+    
+    print(f"distancia de frenagem {d_stop: .2f}")
+    if d <= d_aeb:
+        print("Frenagem autônoma de emergência ativada, risco de colisão")
+        AEB_LATCHED = True
+        return 0.0
+    elif d <= d_fcw and d > d_aeb:
+        return setpoint
+        # print("Alerta de colisão, reduza a velocidade")
+        # if AEB_LATCHED:
+        #     return 0.0
+        # else:
+        #     return setpoint
+        
+    else:
+        return setpoint
+    
+    
+
+
+# ============================================================
+# CONTROLADOR PI DE VELOCIDADE
+# O PI É O ÚNICO RESPONSÁVEL POR APLICAR u AO VEÍCULO.
+# ============================================================
+
+def control_func_pi(car, integral, ref_filtrada, tau):
+    # setpoint = adas(car, SET_VEL)
+    setpoint = SET_VEL
+    ref_filtrada = ref_filtrada + (car.dt / tau) * (setpoint - ref_filtrada)
+
+	
+    v, w = car.get_vel()
+    erro = ref_filtrada - v
+    integral = integral + erro*car.dt
+    prop = 10.0 * erro
+    i = 5.0 * integral
+    tot = prop + i
+    # Controlador PI: o total antes da saturacao mostra as duas contribuicoes
+    car.set_u(tot)
+
+    return integral, prop, i, tot, ref_filtrada
+
+def control_func(car, integral, ref_filtrada, tau):
+    
+    setpoint = adas(car, SET_VEL)
+    # setpoint = SET_VEL
+    
+    print(f"Setpoint: {setpoint:.2f} m/s")
+
+    ref_filtrada = ref_filtrada + (car.dt / tau) * (setpoint - ref_filtrada)
+
+	
+    v, w = car.get_vel()
+    erro = ref_filtrada - v
+    # erro = setpoint - v
+    
+    kp = 10
+    kd = 0.8
+    
+    a = car.get_accel()
+    
+    tot = (kp*erro) + kd*a
+    # tot = (kp*erro)
+    tot = np.clip(tot, -1.0, 1.0)
+    
+    car.set_u(tot)
+
+    return integral, (kp*erro), (kd*a), tot, ref_filtrada
+
+# ============================================================
+# CONTROLADOR ON/OFF ALTERNATIVO
+# Não utilizado no controle principal.
+# ============================================================
+
 def control_OnOff(car, vel):
-	v, w = car.get_vel()
-	if v < vel:
-		car.set_u(0.5)
-	else:
-		car.set_u(0.0)
-		
-########################################
-# thread de visão
-########################################
+
+    v, w = car.get_vel()
+
+    if v < vel:
+        car.set_u(0.5)
+    else:
+        car.set_u(0.0)
+
+
+# ============================================================
+# THREAD DE VISÃO
+# ============================================================
+
 def vision_func(car):
-		
-	# pega imagem
-	image = car.get_image(gray=False)
-	
-	# ultrasom
-	dist, _ = car.get_distance()
-	#print(f'Ultrasonic distance: {dist:.1f}')
-	
-	return image
-				
-########################################
-# main program
-########################################
+
+    image = car.get_image(gray=False)
+
+    dist, _ = car.get_distance()
+
+    return image
+
+
+# ============================================================
+# PROGRAMA PRINCIPAL
+# ============================================================
+
 if __name__ == "__main__":
 	
 	plt.figure(1)
@@ -178,13 +291,9 @@ if __name__ == "__main__":
 
 		integral = 0
 		ref_filtrada = 0.0
-		tau = 0.8
+		tau = 0.45
 
 		control_params = []
-		estado_adas = {
-    "aeb_latched": False,
-    "clear_count": 0
-}
 
 		# main loop
 		while car.t <= parameters['ts']:
@@ -193,19 +302,9 @@ if __name__ == "__main__":
 			car.step()
 						
 			# funcao de controle
-			integral, prop, i, tot, ref_filtrada = control_func(car, integral, ref_filtrada, tau, estado_adas)
-			# control_OnOff(car, 1.5)
-			# if car.t < 2.0:
-			# 	car.set_u(0.5)
-			# elif car.t > 2.0 and car.t < 5.0:
-			# 	car.set_u(1.0)
-			# else:
-			# 	car.set_u(0.0)
-		
-
+			integral, prop, i, tot, ref_filtrada = control_func(car, integral, ref_filtrada, tau)
 			# data = {"t": car.t, "p": prop, "i": i, "tot": tot}
 			# control_params.append(data)
-			# car.set_u(1.0)
 			
 			# funcao de visao
 			image = vision_func(car)
@@ -228,13 +327,13 @@ if __name__ == "__main__":
 
 			plt.subplot(313)
 			plt.cla()
-			t_control = [data["t"] for data in control_params]
-			p = [data["p"] for data in control_params]
-			i = [data["i"] for data in control_params]
-			tot = [data["tot"] for data in control_params]
-			plt.plot(t_control, p, label='P', color='red')
-			plt.plot(t_control, i, label='I')
-			plt.plot(t_control, tot, label='PI')
+			# t_control = [data["t"] for data in control_params]
+			# p = [data["p"] for data in control_params]
+			# i = [data["i"] for data in control_params]
+			# tot = [data["tot"] for data in control_params]
+			# plt.plot(t_control, p, label='P', color='red')
+			# plt.plot(t_control, i, label='I')
+			# plt.plot(t_control, tot, label='PI')
 			plt.axhline(0.0, color="green", linestyle="--")
 			plt.ylabel('u')
 			plt.xlabel('t[s]')

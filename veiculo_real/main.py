@@ -8,6 +8,8 @@
 # Universidade Federal de Minas Gerais
 ########################################
 # -*- coding: utf-8 -*-
+from collections import deque
+
 from fva_car import Car
 import numpy as np
 import matplotlib.pyplot as plt
@@ -17,31 +19,88 @@ import time
 MAIN_VEL = 0.7
 
 SET_VEL = 1.0
+historico_d = deque(maxlen=5)
+AEB_LATCHED = False
 
 #Rx = -0.0931
 	
 ########################################
+# thread de ADAS
+########################################
+
+def adas(car, setpoint):
+    global AEB_LATCHED
+    v = car.get_vel()[0]
+    d = car.get_distance()[0]
+    
+    
+    historico_d.append(d)
+    d = sum(historico_d) / len(historico_d)
+    print(f"distancia media {d: .2f}")
+    
+    if AEB_LATCHED and d <= 3.8:
+        print("latched")
+        return 0.0
+    
+    if d > 3.8:
+        AEB_LATCHED = False
+        print("liberado")
+        return setpoint
+    
+    d_stop = (v**2) * 3.0
+    d_aeb = d_stop + 0.5
+    d_fcw = d_aeb + 1.0
+    
+    print(f"distancia de frenagem {d_stop: .2f}")
+    if d <= d_aeb:
+        print("Frenagem autônoma de emergência ativada, risco de colisão")
+        AEB_LATCHED = True
+        return 0.0
+    elif d <= d_fcw and d > d_aeb:
+        return setpoint
+        # print("Alerta de colisão, reduza a velocidade")
+        # if AEB_LATCHED:
+        #     return 0.0
+        # else:
+        #     return setpoint
+        
+    else:
+        return setpoint
+    
+########################################
 # thread de controle de velocidade
 ########################################
 def control_func(car, integral, ref_filtrada, tau):
+    
+    setpoint = adas(car, SET_VEL)
+    # setpoint = SET_VEL
+    
+    print(f"Setpoint: {setpoint:.2f} m/s")
 
-	ref_filtrada = ref_filtrada + (car.dt / tau) * (SET_VEL - ref_filtrada)
+    ref_filtrada = ref_filtrada + (car.dt / tau) * (setpoint - ref_filtrada)
 
 	
-	v, w = car.get_vel()
-	erro = ref_filtrada - v
-	integral = integral + erro*car.dt
-	prop = 10.0 * erro
-	i = 5.0 * integral
-	tot = prop + i
-	# Controlador PI: o total antes da saturacao mostra as duas contribuicoes
-	car.set_u(tot)
+    v, w = car.get_vel()
+    erro = ref_filtrada - v
+    # erro = setpoint - v
+    
+    kp = 10
+    kd = 0.8
+    
+    a = car.get_accel()
+    
+    tot = (kp*erro) + kd*a
+    # tot = (kp*erro)
+    tot = np.clip(tot, -1.0, 1.0)
+    
+    car.set_u(tot)
 
-	return integral, prop, i, tot, ref_filtrada
+    return integral, (kp*erro), (kd*a), tot, ref_filtrada
 
 
 ########################################
 # thread de visao
+########################################
 def vision_func(car, vision_data, stop_event):
 
 	W, H = car.cam.get_resolution()
@@ -109,7 +168,7 @@ if __name__ == "__main__":
 
 		integral = 0
 		ref_filtrada = 0.0
-		tau = 0.8
+		tau = 0.45
 
 		# controle fica na thread principal
 		while car.t < parameters['ts']:
