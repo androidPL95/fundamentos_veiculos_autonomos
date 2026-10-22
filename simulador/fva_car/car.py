@@ -469,6 +469,7 @@ class Car:
 					'th'    : self.th,
 					'w'     : self.w,
 					'u'     : self.u,
+					'st'	: self.st
 				}
 				
 		# se ja iniciou as trajetorias
