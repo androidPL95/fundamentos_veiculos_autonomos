@@ -31,7 +31,6 @@ parameters = {
 # Chavear a fonte de set-point (visão computacional ou referência manual)
 USAR_VISAO_NO_LATERAL = False
 
-SINAL_DIRECAO = -1.0
 SET_VEL = 1.0           # Referência de velocidade longitudinal 
 SET_Y = -9.0            # Ajuste manual de referência simples de eixo pra seguir
 SET_THETA = np.pi       # No car.py, andar reto para +x corresponde a theta = pi
