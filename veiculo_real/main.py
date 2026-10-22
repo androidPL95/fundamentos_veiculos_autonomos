@@ -72,10 +72,10 @@ def adas(car, setpoint):
 ########################################
 def control_func(car, integral, ref_filtrada, tau):
     
-    setpoint = adas(car, SET_VEL)
-    # setpoint = SET_VEL
+    # setpoint = adas(car, SET_VEL)
+    setpoint = SET_VEL
     
-    print(f"Setpoint: {setpoint:.2f} m/s")
+    # print(f"Setpoint: {setpoint:.2f} m/s")
 
     ref_filtrada = ref_filtrada + (car.dt / tau) * (setpoint - ref_filtrada)
 
@@ -83,13 +83,14 @@ def control_func(car, integral, ref_filtrada, tau):
     v, w = car.get_vel()
     erro = ref_filtrada - v
     # erro = setpoint - v
+    print(f"Velocidade {v:.2f} m/s")
     
-    kp = 10
-    kd = 0.8
+    kp = 0.42
+    kd = 0.25
     
     a = car.get_accel()
     
-    tot = (kp*erro) + kd*a
+    tot = (kp*erro) - kd*a
     # tot = (kp*erro)
     tot = np.clip(tot, -1.0, 1.0)
     
@@ -188,6 +189,8 @@ if __name__ == "__main__":
 			# 	car.set_vel(0.0)
 			# else:
 			# 	car.set_vel(MAIN_VEL)
+
+			car.set_steer(0.0)
 
 			integral, prop, i, tot, ref_filtrada = control_func(car, integral, ref_filtrada, tau)
 

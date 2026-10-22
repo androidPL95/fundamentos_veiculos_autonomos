@@ -13,6 +13,7 @@ from fva_car import Car
 import numpy as np
 import matplotlib
 from collections import deque
+from fva_car.ADAS import ADAS
 
 matplotlib.use("QtAgg")
 
@@ -32,9 +33,11 @@ parameters = {
     "beep": True,
 }
 
-SET_VEL = 1.0
+ad = ADAS()
+SET_VEL = 2.0
 historico_d = deque(maxlen=5)
 AEB_LATCHED = False
+
 
 # ============================================================
 # ADAS: FCW + AEB
@@ -42,6 +45,7 @@ AEB_LATCHED = False
 # Ele NÃO chama car.set_u().
 # ============================================================
 
+    
 def adas_fcw_aeb(car, estado_adas):
     """
     Retorna:
@@ -173,7 +177,8 @@ def adas(car, setpoint):
         print("liberado")
         return setpoint
     
-    d_stop = (v**2) * 3.0
+    # d_stop = (v**2) * 3.0
+    d_stop = (v**2)
     d_aeb = d_stop + 0.5
     d_fcw = d_aeb + 1.0
     
@@ -220,7 +225,9 @@ def control_func_pi(car, integral, ref_filtrada, tau):
 
 def control_func(car, integral, ref_filtrada, tau):
     
-    setpoint = adas(car, SET_VEL)
+    setpoint = ad.ACC(car, 3.8, SET_VEL)
+    # print(f"Setpoint ACC: {setpoint:.2f} m/s")
+    setpoint = adas(car, setpoint)
     # setpoint = SET_VEL
     
     print(f"Setpoint: {setpoint:.2f} m/s")
