@@ -53,21 +53,69 @@ def control_func(car, integral, erro_anterior, ref_filtrada, tau):
 ########################################
 # thread de visão
 ########################################
-def vision_func(car):
+def vision_func(car, dq_rho, dq_theta):
 		
 	# pega imagem
-	# image = car.get_image(gray=False)
 	image = car.get_image(gray=False)
 
 	image_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
 	image_hsv = cv2.bilateralFilter(image_hsv, 9, 75, 75)
+
+	lower_yellow = np.array([20,50,50])
+	upper_yellow = np.array([40,255,255])
+
+	# Threshold the HSV image to get only yellow colors
+	mask = cv2.inRange(image_hsv, lower_yellow, upper_yellow)
+
+	canny = cv2.Canny(mask, 50, 200)
+
+	image_copy = image.copy()
+	
+	lines = cv2.HoughLines(canny,1,np.pi/180,80)
+
+	if lines is not None:
+		for line in lines:
+			rho,theta = line[0]
+			a = np.cos(theta)
+			b = np.sin(theta)
+			x0 = a*rho
+			y0 = b*rho
+			x1 = int(x0 + 1000*(-b))
+			y1 = int(y0 + 1000*(a))
+			x2 = int(x0 - 1000*(-b))
+			y2 = int(y0 - 1000*(a))
+		
+			cv2.line(image_copy,(x1,y1),(x2,y2),(0,0,255),2)
+
+	if lines is not None:
+		rho_mean = float(np.mean(lines[:,0,0]))
+		theta_mean = float(np.mean(lines[:,0,1]))
+
+		dq_rho.append(rho_mean)
+		dq_theta.append(theta_mean)
+
+		rho_filtrado = np.mean(dq_rho)
+		theta_filtrado = np.mean(dq_theta)
+
+		# if abs(rho_filtrado - rho_mean) > 10:
+		# 	rho_filtrado = rho_mean 
+
+		a = np.cos(theta_filtrado)
+		b = np.sin(theta_filtrado)
+		x0 = a*rho_filtrado
+		y0 = b*rho_filtrado
+		x1 = int(x0 + 1000*(-b))
+		y1 = int(y0 + 1000*(a))
+		x2 = int(x0 - 1000*(-b))
+		y2 = int(y0 - 1000*(a))
+		cv2.line(image_copy, (x1,y1), (x2,y2), (0,255,0), 2)
 	
 	# ultrasom
 	dist, _ = car.get_distance()
 	#print(f'Ultrasonic distance: {dist:.1f}')
 	
-	return image, image_hsv
+	return image, image_copy
 				
 ########################################
 # main program
@@ -113,56 +161,7 @@ if __name__ == "__main__":
 			control_params.append(data)
 			
 			# funcao de visao
-			image, image_hsv = vision_func(car)
-
-			lower_yellow = np.array([20,50,50])
-			upper_yellow = np.array([40,255,255])
-		
-			# Threshold the HSV image to get only yellow colors
-			mask = cv2.inRange(image_hsv, lower_yellow, upper_yellow)
-
-			canny = cv2.Canny(mask, 50, 200)
-
-			image_copy = image.copy()
-			
-			lines = cv2.HoughLines(canny,1,np.pi/180,80)
-
-			if lines is not None:
-				for line in lines:
-					rho,theta = line[0]
-					a = np.cos(theta)
-					b = np.sin(theta)
-					x0 = a*rho
-					y0 = b*rho
-					x1 = int(x0 + 1000*(-b))
-					y1 = int(y0 + 1000*(a))
-					x2 = int(x0 - 1000*(-b))
-					y2 = int(y0 - 1000*(a))
-				
-					cv2.line(image_copy,(x1,y1),(x2,y2),(0,0,255),2)
-
-			if lines is not None:
-				rho_mean = float(np.mean(lines[:,0,0]))
-				theta_mean = float(np.mean(lines[:,0,1]))
-
-				dq_rho.append(rho_mean)
-				dq_theta.append(theta_mean)
-
-				rho_filtrado = np.mean(dq_rho)
-				theta_filtrado = np.mean(dq_theta)
-
-				# if abs(rho_filtrado - rho_mean) > 10:
-				# 	rho_filtrado = rho_mean 
-
-				a = np.cos(theta_filtrado)
-				b = np.sin(theta_filtrado)
-				x0 = a*rho_filtrado
-				y0 = b*rho_filtrado
-				x1 = int(x0 + 1000*(-b))
-				y1 = int(y0 + 1000*(a))
-				x2 = int(x0 - 1000*(-b))
-				y2 = int(y0 - 1000*(a))
-				cv2.line(image_copy, (x1,y1), (x2,y2), (0,255,0), 2)
+			image, image_copy = vision_func(car, dq_rho, dq_theta)
 			
 			########################################
 			# plota	
