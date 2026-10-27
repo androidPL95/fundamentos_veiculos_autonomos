@@ -46,6 +46,8 @@ class Car:
 		
 		# inicia simulador
 		self.init_coppelia_sim()
+
+		self.init_camera()
 		
 		# tempo
 		self.t = 0.0
@@ -127,6 +129,16 @@ class Car:
 		self.ultra = self.sim.getObject('/Car/ultra_front')  # ajuste o nome igual ao da cena
 		if self.ultra == -1:
 			print('Erro: ultrassônico não encontrado')
+
+
+	def init_camera(self):
+		try:
+			from . import camera
+			self.cam = camera.Camera()
+		except Exception as e:
+			print(f"\033[31mErro na camera: {e}\033[0m", flush=True)
+			raise
+
 	
 	########################################
 	# get states
@@ -423,26 +435,28 @@ class Car:
 	
 	########################################
 	# get image data
+	# def get_image(self, gray=False):
+		
+	# 	while True:
+	# 		image, resolution = self.sim.getVisionSensorImg(self.cam)
+	# 		if image != -1:
+	# 			break
+		
+	# 	# trata imagem
+	# 	img = np.frombuffer(image, dtype=np.uint8)
+	# 	img = img.reshape([resolution[1], resolution[0], 3])
+
+	# 	# corrige orientacao da imagem do CoppeliaSim
+	# 	img = np.flipud(img)
+
+	# 	# converte para tons de cinza, se solicitado
+	# 	if gray:
+	# 		img = np.mean(img, axis=2).astype(np.uint8)
+
+	# 	return img
 	def get_image(self, gray=False):
-		
-		while True:
-			image, resolution = self.sim.getVisionSensorImg(self.cam)
-			if image != -1:
-				break
-		
-		# trata imagem
-		img = np.frombuffer(image, dtype=np.uint8)
-		img = img.reshape([resolution[1], resolution[0], 3])
+		return self.cam.get_image(gray)
 
-		# corrige orientacao da imagem do CoppeliaSim
-		img = np.flipud(img)
-
-		# converte para tons de cinza, se solicitado
-		if gray:
-			img = np.mean(img, axis=2).astype(np.uint8)
-
-		return img
-		
 	########################################
 	# get ultrasonic distance
 	def get_distance(self, max_dist=4.0):

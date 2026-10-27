@@ -13,6 +13,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import threading
 import time
+import cv2
+from collections import deque
 
 MAIN_VEL = 0.7
 
@@ -46,27 +48,34 @@ def vision_func(car, vision_data, stop_event):
 
 	W, H = car.cam.get_resolution()
 
+	dq_rho = deque(maxlen=20)
+	dq_theta = deque(maxlen=20)
+
 	while not stop_event.is_set():
 
 		# pega imagem
 		frame = car.get_image(gray=True)
 
-		# detecta aruco
-		frame, point = car.cam.detect_aruco(
-			frame,
-			aruco_id=23
-		)
+		image_hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+		
+		image_hsv = cv2.bilateralFilter(image_hsv, 9, 75, 75)
 
-		# disponibiliza imagem para o main
-		vision_data["frame"] = frame
+		# # detecta aruco
+		# frame, point = car.cam.detect_aruco(
+		# 	frame,
+		# 	aruco_id=23
+		# )
 
-		if point is None:
-			continue
+		# # disponibiliza imagem para o main
+		# vision_data["frame"] = frame
 
-		# esterçamento aponta para o aruco
-		cx = point[0] - W/2
+		# if point is None:
+		# 	continue
 
-		vision_data["refste"] = -np.deg2rad(20.0*cx/(W/2))
+		# # esterçamento aponta para o aruco
+		# cx = point[0] - W/2
+
+		# vision_data["refste"] = -np.deg2rad(20.0*cx/(W/2))
 		
 ########################################
 # main
@@ -130,7 +139,7 @@ if __name__ == "__main__":
 			# else:
 			# 	car.set_vel(MAIN_VEL)
 
-			integral, prop, i, tot, ref_filtrada = control_func(car, integral, ref_filtrada, tau)
+			# integral, prop, i, tot, ref_filtrada = control_func(car, integral, ref_filtrada, tau)
 
 			# telemetria para plots remotos
 			print(
