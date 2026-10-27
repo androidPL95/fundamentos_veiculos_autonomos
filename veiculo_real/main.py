@@ -31,12 +31,16 @@ AEB_LATCHED = False
 def adas(car, setpoint):
     global AEB_LATCHED
     v = car.get_vel()[0]
-    d = car.get_distance()[0]
+    d, valid = car.get_distance()
+    print(f"Valid: {valid}")
     
     
     historico_d.append(d)
     d = sum(historico_d) / len(historico_d)
     print(f"distancia media {d: .2f}")
+    
+    if not valid:
+        return setpoint
     
     if AEB_LATCHED and d <= 3.8:
         print("latched")
@@ -73,7 +77,9 @@ def adas(car, setpoint):
 def control_func(car, integral, ref_filtrada, tau):
     
     # setpoint = adas(car, SET_VEL)
+    
     setpoint = SET_VEL
+    car.vref = setpoint
     
     # print(f"Setpoint: {setpoint:.2f} m/s")
 
@@ -85,7 +91,7 @@ def control_func(car, integral, ref_filtrada, tau):
     # erro = setpoint - v
     print(f"Velocidade {v:.2f} m/s")
     
-    kp = 0.42
+    kp = 0.5
     kd = 0.25
     
     a = car.get_accel()
@@ -134,7 +140,7 @@ def vision_func(car, vision_data, stop_event):
 if __name__ == "__main__":
 
 	parameters = {	
-				'ts'					: 20.0, 	# tempo da execucao
+				'ts'					: 120.0, 	# tempo da execucao
 				'save'					: True,		# salva dados da trajetoria
 				'logfile'				: 'logs/',	# log file
 				'camera'				: False,	# habilitar camera e thread de visao
