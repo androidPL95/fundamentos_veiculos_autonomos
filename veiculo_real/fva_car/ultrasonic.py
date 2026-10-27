@@ -12,6 +12,7 @@ import numpy as np
 import threading
 import re
 import subprocess
+from enum import IntEnum
 
 ########################################
 # Globais
@@ -27,7 +28,16 @@ GAIN = 343.0/2.0
 TRIGGER_PIN = 24
 ECHO_PIN = 8
 SAMPLE_TIME = 0.1  # 100 ms -> 10 Hz
-SENSOR_TIMEOUT  = 0.30   	# tempo maximo sem medida [s]
+THREAD_TIMEOUT = 0.30   	# tempo maximo sem atualizacao da thread [s]
+
+
+class DistanceError(IntEnum):
+	OK = 0
+	NO_TRIGGER = 1
+	NO_ECHO = 2
+	OUT_OF_RANGE = 3
+	THREAD_TIMEOUT = 4
+	ECHO_STUCK = 5
 
 ############################################
 # Ultrasonic Class for Raspberry Pi 4 or 5
@@ -53,9 +63,9 @@ class Ultrasonic:
 		self.min_range = min_range
 		self.max_range = max_range
 		
-		# ultima leitura valida
-		self.dist = 0.0
-		self.valid = False
+		# ultima resposta do sensor
+		self.dist = self.min_range
+		self.error = DistanceError.THREAD_TIMEOUT
 		self.last_measurement = time.monotonic()
 
 		# Detectar a versao da Raspberry
@@ -135,12 +145,11 @@ class Ultrasonic:
 
 		# loop de leitura
 		while not self.stop.is_set():
-			d = self.get_measure()
-			if d is not None:
-				with self.lock:
-					self.dist = d
-					self.last_measurement = time.monotonic()
-					self.valid = True
+			d, error = self.get_measure()
+			with self.lock:
+				self.dist = d
+				self.error = error
+				self.last_measurement = time.monotonic()
 
 			self.stop.wait(SAMPLE_TIME)
 	
@@ -149,11 +158,11 @@ class Ultrasonic:
 	########################################			
 	def get_distance(self):
 		with self.lock:
-			# medida eh valida?
-			if (time.monotonic() - self.last_measurement) > SENSOR_TIMEOUT:
-				self.valid = False
+			# o watchdog indica que a thread de leitura deixou de responder
+			if (time.monotonic() - self.last_measurement) > THREAD_TIMEOUT:
+				return self.min_range, DistanceError.THREAD_TIMEOUT
 
-			return self.dist, self.valid
+			return self.dist, self.error
 	
 	########################################
 	# escreve no pino de trigger
@@ -170,29 +179,35 @@ class Ultrasonic:
 	########################################
 	def get_measure(self):
 
+		# ECHO e uma saida do sensor; nao force o pino para LOW.
+		if self.read_func():
+			return self.min_range, DistanceError.ECHO_STUCK
+
 		# envia pulso de trigger
+		self._set_trigger(False)
+		time.sleep(0.000002)
 		self._set_trigger(True)
-		time.sleep(0.00002)
+		time.sleep(0.000010)
 		self._set_trigger(False)
 
 		# espera inicio do eco
 		ok1, start_time = self._measure_pulse(1)
+		if not ok1:
+			return self.min_range, DistanceError.NO_TRIGGER
 
 		# mede duracao do eco
 		ok2, stop_time = self._measure_pulse(0)
-
-		# deu tudo certo?
-		if not ok1 or not ok2:
-			return None
+		if not ok2:
+			return self.max_range, DistanceError.NO_ECHO
 
 		# calcula distancia
 		time_elapsed = stop_time - start_time
 		distance = GAIN * time_elapsed
 		
 		if not (self.min_range <= distance <= self.max_range):
-			return None
+			return self.max_range, DistanceError.OUT_OF_RANGE
 
-		return distance
+		return distance, DistanceError.OK
 
 	########################################
 	# mede os pulsos com timeout
@@ -242,16 +257,16 @@ if __name__ == '__main__':
 	try:
 		while True:
 
-			distance, valid = us.get_distance()
+			distance, error = us.get_distance()
 
-			if valid:
+			if error == DistanceError.OK:
 				print(
-					f"Distancia = {distance:.2f} m | Valida = SIM",
+					f"Distancia = {distance:.2f} m | Codigo = {error.name}",
 					flush=True
 				)
 			else:
 				print(
-					f"Distancia = {distance:.2f} m | Valida = NAO",
+					f"Distancia = {distance:.2f} m | Codigo = {error.name}",
 					flush=True
 				)
 

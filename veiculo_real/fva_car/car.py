@@ -523,18 +523,21 @@ class Car:
 	def get_distance(self, max_dist=4.0, d_min=0.3):
 		
 		# captura a distancia
-		d, valid = self.us.get_distance()
+		d, error = self.us.get_distance()
 		d = np.min([d, max_dist])
 
-		# toca o buzzer se muito proximo ou invalido
+		# toca o buzzer para falhas de comunicacao ou timeout
 		if self.parameters['us_buzzer']:
-			if not valid:
+			if error in (
+					ultrasonic.DistanceError.NO_TRIGGER,
+					ultrasonic.DistanceError.THREAD_TIMEOUT,
+					ultrasonic.DistanceError.ECHO_STUCK):
 				self.bz.beep(0.1)
-			elif d <= d_min:
+			elif error == ultrasonic.DistanceError.OK and d <= d_min:
 				self.bz.beep(d/3.0)
 				
 		# retorna distancia
-		return d , valid
+		return d, error
 	
 	########################################
 	# salva a trajetoria
@@ -679,9 +682,9 @@ if __name__ == "__main__":
 			car.step()
 			
 			# le ultrasom
-			dist, valid = car.get_distance()
+			dist, error = car.get_distance()
 			# seta torque do motor
-			if valid and dist > 0.10:
+			if error in (ultrasonic.DistanceError.OK, ultrasonic.DistanceError.NO_ECHO, ultrasonic.DistanceError.OUT_OF_RANGE) and dist > 0.10:
 				if t < parameters['ts']/2:
 					car.set_vel(0.7)
 				else:
