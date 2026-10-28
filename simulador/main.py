@@ -89,14 +89,38 @@ def vision_func(car, dq_rho, dq_theta):
 			cv2.line(image_copy,(x1,y1),(x2,y2),(0,0,255),2)
 
 	if lines is not None:
+		rhos = lines[:, 0, 0].astype(float)
+		thetas = lines[:, 0, 1].astype(float)
+
+		normals = np.column_stack((np.cos(thetas), np.sin(thetas)))
+		reference = normals[0]
+
+		# Alinha representações equivalentes à orientação da primeira linha.
+		flip = normals @ reference < 0
+		normals[flip] *= -1
+		rhos[flip] *= -1
+
+		mean_normal = normals.mean(axis=0)
+		normal_length = np.linalg.norm(mean_normal)
+
+		if normal_length > 1e-8:
+			mean_normal /= normal_length
+			rho_mean = float(np.mean(rhos))
+			theta_mean = float(np.arctan2(mean_normal[1], mean_normal[0]))
+			# Continue daqui com o deque e o desenho da linha.
+
 		rho_mean = float(np.mean(lines[:,0,0]))
 		theta_mean = float(np.mean(lines[:,0,1]))
 
 		dq_rho.append(rho_mean)
 		dq_theta.append(theta_mean)
 
-		rho_filtrado = np.mean(dq_rho)
-		theta_filtrado = np.mean(dq_theta)
+		if len(dq_rho) < 20:
+			rho_filtrado = rho_mean
+			theta_filtrado = theta_mean
+		else:
+			rho_filtrado = np.mean(dq_rho)
+			theta_filtrado = np.mean(dq_theta)
 
 		# if abs(rho_filtrado - rho_mean) > 10:
 		# 	rho_filtrado = rho_mean 
