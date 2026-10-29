@@ -15,9 +15,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import threading
 import time
+from fva_car.ADAS import ADAS
 
 MAIN_VEL = 0.7
 
+ad = ADAS()
 SET_VEL = 1.0
 historico_d = deque(maxlen=5)
 AEB_LATCHED = False
@@ -39,8 +41,8 @@ def adas(car, setpoint):
     d = sum(historico_d) / len(historico_d)
     print(f"distancia media {d: .2f}")
     
-    if not valid:
-        return setpoint
+    # if not valid:
+    #     return setpoint
     
     if AEB_LATCHED and d <= 3.8:
         print("latched")
@@ -77,8 +79,9 @@ def adas(car, setpoint):
 def control_func(car, integral, ref_filtrada, tau):
     
     # setpoint = adas(car, SET_VEL)
+    setpoint = ad.ACC(car, 3.0, 0.5)
     
-    setpoint = SET_VEL
+    # setpoint = SET_VEL
     car.vref = setpoint
     
     # print(f"Setpoint: {setpoint:.2f} m/s")
@@ -90,6 +93,7 @@ def control_func(car, integral, ref_filtrada, tau):
     erro = ref_filtrada - v
     # erro = setpoint - v
     print(f"Velocidade {v:.2f} m/s")
+    print(f"Distancia: {car.get_distance()[0]}")
     
     kp = 0.5
     kd = 0.25
@@ -100,7 +104,16 @@ def control_func(car, integral, ref_filtrada, tau):
     # tot = (kp*erro)
     tot = np.clip(tot, -1.0, 1.0)
     
-    car.set_u(tot)
+    
+    
+    if setpoint == 0.0 and v <= 0.05:
+        car.set_u(-1.0)
+        # print(f"Controlador desligado")s
+    else:
+        car.set_u(tot)
+        
+    print(F"setpoint {setpoint}")
+    # print(f"Car.set_u {tot}")
 
     return integral, (kp*erro), (kd*a), tot, ref_filtrada
 
@@ -140,7 +153,7 @@ def vision_func(car, vision_data, stop_event):
 if __name__ == "__main__":
 
 	parameters = {	
-				'ts'					: 120.0, 	# tempo da execucao
+				'ts'					: 20.0, 	# tempo da execucao
 				'save'					: True,		# salva dados da trajetoria
 				'logfile'				: 'logs/',	# log file
 				'camera'				: False,	# habilitar camera e thread de visao
