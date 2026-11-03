@@ -526,12 +526,12 @@ class Car:
 		d, valid = self.us.get_distance()
 		d = np.min([d, max_dist])
 
-		# toca o buzzer se muito proximo ou invalido
-		if self.parameters['us_buzzer']:
-			if not valid:
-				self.bz.beep(0.1)
-			elif d <= d_min:
-				self.bz.beep(d/3.0)
+		# # toca o buzzer se muito proximo ou invalido
+		# if self.parameters['us_buzzer']:
+		# 	if not valid:
+		# 		self.bz.beep(0.1)
+		# 	elif d <= d_min:
+		# 		self.bz.beep(d/3.0)
 				
 		# retorna distancia
 		return d , valid
