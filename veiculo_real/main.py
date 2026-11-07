@@ -21,7 +21,7 @@ import cv2
 MAIN_VEL = 0.7
 
 # ad = ADAS()
-SET_VEL = 1.0
+SET_VEL = 0.5
 historico_d = deque(maxlen=5)
 AEB_LATCHED = False
 
@@ -38,7 +38,7 @@ K_HEADING = 1.0
 K_LATERAL_VISAO = 1.5
 K_HEADING_VISAO = 1.0
 
-SINAL_OFFSET_VISAO = -1.0
+SINAL_OFFSET_VISAO = 1.0
 SINAL_HEADING_VISAO = 1.0
 
 MAX_STEER = np.deg2rad(5.0)
@@ -57,32 +57,32 @@ def adas(car, setpoint):
     global AEB_LATCHED
     v = car.get_vel()[0]
     d, valid = car.get_distance()
-    print(f"Valid: {valid}")
+    # print(f"Valid: {valid}")s
     
     
     historico_d.append(d)
     d = sum(historico_d) / len(historico_d)
-    print(f"distancia media {d: .2f}")
+    # print(f"distancia media {d: .2f}")
     
     # if not valid:
     #     return setpoint
     
     if AEB_LATCHED and d <= 3.8:
-        print("latched")
+        # print("latched")
         return 0.0
     
     if d > 3.8:
         AEB_LATCHED = False
-        print("liberado")
+        # print("liberado")
         return setpoint
     
     d_stop = (v**2) * 3.0
     d_aeb = d_stop + 0.5
     d_fcw = d_aeb + 1.0
     
-    print(f"distancia de frenagem {d_stop: .2f}")
+    # print(f"distancia de frenagem {d_stop: .2f}")
     if d <= d_aeb:
-        print("Frenagem autônoma de emergência ativada, risco de colisão")
+        # print("Frenagem autônoma de emergência ativada, risco de colisão")
         AEB_LATCHED = True
         return 0.0
     elif d <= d_fcw and d > d_aeb:
@@ -117,8 +117,8 @@ def control_func(car, ref_filtrada, theta_filtrado, tau, erro_visao, theta_visao
     v, w = car.get_vel()
     erro = ref_filtrada - v
     # erro = setpoint - v
-    print(f"Velocidade {v:.2f} m/s")
-    print(f"Distancia: {car.get_distance()[0]}")
+    # print(f"Velocidade {v:.2f} m/s")
+    # print(f"Distancia: {car.get_distance()[0]}")
     
     kp = 0.5
     kd = 0.25
@@ -138,7 +138,7 @@ def control_func(car, ref_filtrada, theta_filtrado, tau, erro_visao, theta_visao
     else:
         car.set_u(tot)
         
-    print(F"setpoint {setpoint}")
+    # print(F"setpoint {setpoint}")
     # print(f"Car.set_u {tot}")
 
     # Primeiro segundo sem comando lateral
@@ -185,6 +185,9 @@ def control_func(car, ref_filtrada, theta_filtrado, tau, erro_visao, theta_visao
         delta_lat = float(np.clip(delta_alvo, car.st - passo_max, car.st + passo_max))
         
     # O comando longitudinal ja foi enviado acima (incluindo a frenagem).
+    print(f"\nComando: {delta_lat}\n")
+    # print(f"\nLinha detectada: {}\n")
+
     car.set_steer(delta_lat)
     
     return ref_filtrada, theta_filtrado
@@ -193,7 +196,7 @@ def control_func(car, ref_filtrada, theta_filtrado, tau, erro_visao, theta_visao
 ########################################
 # thread de visao
 ########################################
-def vision_func(car):
+def vision_func(car, numero_tracos=6):
     image = car.get_image(gray=False)
 
     if image is None:
@@ -203,17 +206,15 @@ def vision_func(car):
     h, w, _ = vis_img.shape
     centro_x = w / 2.0
 
-    hsv = cv2.cvtColor(vis_img, cv2.COLOR_RGB2HSV)
+    hsv = cv2.cvtColor(vis_img, cv2.COLOR_BGR2HSV)
 
-    amarelo_baixo = np.array([15, 80, 80])
-    amarelo_alto = np.array([40, 255, 255])
+    amarelo_baixo = np.array([15, 50, 40])
+    amarelo_alto = np.array([40, 255, 170])
     mask = cv2.inRange(hsv, amarelo_baixo, amarelo_alto)
 
-    y_perto = int(h * 0.85)
-    y_longe = int(h * 0.60)
-
-    cols_perto = np.where(mask[y_perto, :] > 0)[0]
-    cols_longe = np.where(mask[y_longe, :] > 0)[0]
+    # Alturas do teste offline: 85%, 77%, 69%, ... da imagem.
+    numero_tracos = max(2, min(numero_tracos, 8))
+    alturas = sorted({int(h * (85 - i * 8) / 100) for i in range(numero_tracos)})
 
     cv2.line(
         vis_img,
@@ -223,11 +224,26 @@ def vision_func(car):
         1,
     )
 
-    if len(cols_perto) == 0 or len(cols_longe) == 0:
+    delta_y = 4
+    xs_validos = []
+    ys_validos = []
+    for y in alturas:
+        faixa = mask[max(0, y - delta_y):min(h, y + delta_y + 1), :]
+        cols = np.where(faixa > 0)[1]
+        if len(cols) > 15:
+            x = float(np.mean(cols))
+            xs_validos.append(x)
+            ys_validos.append(y)
+            cv2.circle(vis_img, (int(x), y), 5, (255, 0, 0), -1)
+
+    if len(ys_validos) < 2:
         return vis_img, None, None
 
-    x_perto = float(np.mean(cols_perto))
-    x_longe = float(np.mean(cols_longe))
+    # Ajusta a reta x = a*y + b usando todos os pontos detectados.
+    coef_angular, intercepto = np.polyfit(ys_validos, xs_validos, 1)
+    y_longe, y_perto = alturas[0], alturas[-1]
+    x_longe = float(coef_angular * y_longe + intercepto)
+    x_perto = float(coef_angular * y_perto + intercepto)
 
     # Offset normalizado pela metade da largura da imagem.
     erro_lat_norm = (centro_x - x_perto) / (w / 2.0)
@@ -237,26 +253,10 @@ def vision_func(car):
     dy = y_perto - y_longe
     theta_e = float(np.arctan2(-dx, dy))
 
-    cv2.circle(
-        vis_img,
-        (int(x_perto), y_perto),
-        5,
-        (255, 0, 0),
-        -1,
-    )
-
-    cv2.circle(
-        vis_img,
-        (int(x_longe), y_longe),
-        5,
-        (0, 255, 0),
-        -1,
-    )
-
     cv2.line(
         vis_img,
-        (int(x_perto), y_perto),
-        (int(x_longe), y_longe),
+        (int(round(x_perto)), y_perto),
+        (int(round(x_longe)), y_longe),
         (0, 255, 255),
         2,
     )
@@ -272,6 +272,13 @@ def vision_loop(car, vision_data, vision_lock, stop_event):
         while not stop_event.is_set():
             # O processamento demorado acontece FORA do lock.
             frame, erro_visao, theta_visao = vision_func(car)
+            if frame is None:
+                print("LINHA NÃO DETECTADA!")
+            elif erro_visao is None or theta_visao is None:
+                print("LINHA NÃO DETECTADA!")
+            else:
+                print("LINHA DETECTADA!")
+            car.cam.publish_frame(frame)
 
             # Publica os tres valores juntos: pertencem a mesma imagem.
             with vision_lock:
@@ -315,6 +322,7 @@ if __name__ == "__main__":
         car.start_mission()
 
         if parameters['camera']:
+            car.cam.start_stream()
             thread_vision = threading.Thread(
                 target=vision_loop,
                 args=(car, vision_data, vision_lock, stop_event),
@@ -345,19 +353,19 @@ if __name__ == "__main__":
                 erro_visao, theta_visao,
             )
 
-            print(
-                f"DATA,"
-                f"{car.t:.2f},"
-                f"{car.p[0]:.2f},"
-                f"{car.p[1]:.2f},"
-                f"{car.v:.2f},"
-                f"{car.vref:.2f},"
-                f"{car.a:.2f},"
-                f"{car.u:.2f},"
-                f"{car.w:.2f},"
-                f"{car.th:.2f}",
-                flush=True,
-            )
+            # print(
+            #     f"DATA,"
+            #     f"{car.t:.2f},"
+            #     f"{car.p[0]:.2f},"
+            #     f"{car.p[1]:.2f},"
+            #     f"{car.v:.2f},"
+            #     f"{car.vref:.2f},"
+            #     f"{car.a:.2f},"
+            #     f"{car.u:.2f},"
+            #     f"{car.w:.2f},"
+            #     f"{car.th:.2f}",
+            #     flush=True,
+            # )
 
             # Matplotlib permanece na thread principal.
             if time.monotonic() - t_plot >= 1.0:
