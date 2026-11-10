@@ -93,6 +93,13 @@ LIMIAR_SNR = 5.0         # quanto a fita precisa se destacar do piso (1e9 deslig
 HORIZONTE_FRAC = 0.106   # calibracao da camera: linha do horizonte / altura (51/480)
 K_LARGURA = 0.084        # calibracao: largura da fita (px) = K_LARGURA * (linha - horizonte)
 
+MODO_CONTROLE = "cones"  # "linha" ou "cones"
+
+H_CONE_VERMELHO = 0.0    # matiz dos cones vermelhos (OpenCV 0..180)
+H_CONE_VERDE = 72.0      # matiz dos cones verdes
+LIMIAR_CONE = 40         # score minimo de cor do cone (mesmo para as duas cores)
+AREA_MIN_CONE = 15       # pixels minimos para um blob contar como cone
+
 # CAMADA 3 - segurar a ultima reta
 TEMPO_SEGURA = 0.5       # s (-1 desliga)
 
@@ -103,6 +110,8 @@ LOG_DEBUG = True
 SALVAR_FRAMES_A_CADA = 20      # salva imagem + mascara a cada N passos (0 = nunca)
 PASTA_DEBUG = "logs/debug/"
 DEBUG = {}                     # preenchido por vision_func e control_func a cada passo
+
+
 
 
 # ============================================================
@@ -224,89 +233,8 @@ def control_func(car, ref_filtrada, theta_filtrado, delta_anterior, tau,
 # VISAO (igual ao carro real, executada no loop principal)
 # ============================================================
 
-def vision_func_old(car, numero_tracos=6):
-    image = car.get_image(gray=False)
-
-    if image is None:
-        return None, None, None
-
-    vis_img = image.copy()
-    h, w, _ = vis_img.shape
-    centro_x = w / 2.0
-
-    if IMAGEM_RGB:
-        hsv = cv2.cvtColor(vis_img, cv2.COLOR_RGB2HSV)
-    else:
-        hsv = cv2.cvtColor(vis_img, cv2.COLOR_BGR2HSV)
-
-    amarelo_baixo = np.array([15, 50, 40])
-    amarelo_alto = np.array([40, 255, 170])
-    mask = cv2.inRange(hsv, amarelo_baixo, amarelo_alto)
-
-    # Alturas: 85%, 77%, 69%, ... da imagem.
-    numero_tracos = max(2, min(numero_tracos, 8))
-    alturas = sorted({int(h * (85 - i * 8) / 100) for i in range(numero_tracos)})
-
-    cv2.line(vis_img, (int(centro_x), int(h * 0.5)), (int(centro_x), h - 1),
-             (255, 255, 255), 1)
-
-    delta_y = 4
-    xs_validos = []
-    ys_validos = []
-    larguras = []   # largura (px) da regiao amarela em cada faixa
-    contagens = []
-    for y in alturas:
-        faixa = mask[max(0, y - delta_y):min(h, y + delta_y + 1), :]
-        cols = np.where(faixa > 0)[1]
-        contagens.append(len(cols))
-        if len(cols) > 0:
-            larguras.append(int(cols.max() - cols.min()))
-        if len(cols) > 15:
-            x = float(np.mean(cols))
-            xs_validos.append(x)
-            ys_validos.append(y)
-            cv2.circle(vis_img, (int(x), y), 5, (255, 0, 0), -1)
-
-    DEBUG["mask"] = mask
-    DEBUG["img_w"] = w
-    DEBUG["n_pontos"] = len(ys_validos)
-    DEBUG["largura_max_px"] = max(larguras) if larguras else -1
-    DEBUG["contagem_min"] = min(contagens) if contagens else 0
-    DEBUG["xs"] = ";".join(f"{x:.1f}" for x in xs_validos)
-    DEBUG["ys"] = ";".join(str(y) for y in ys_validos)
-
-    if len(ys_validos) < 2:
-        return vis_img, None, None
-
-    # Ajusta a reta x = a*y + b usando todos os pontos detectados.
-    coef_angular, intercepto = np.polyfit(ys_validos, xs_validos, 1)
-    y_longe, y_perto = alturas[0], alturas[-1]
-    x_longe = float(coef_angular * y_longe + intercepto)
-    x_perto = float(coef_angular * y_perto + intercepto)
-
-    # Offset normalizado pela metade da largura da imagem.
-    erro_lat_norm = (centro_x - x_perto) / (w / 2.0)
-
-    # Inclinacao da linha na imagem, sujeita a perspectiva
-    dx = x_longe - x_perto
-    dy = y_perto - y_longe
-    theta_e = float(np.arctan2(-dx, dy))
-
-    cv2.line(vis_img, (int(round(x_perto)), y_perto), (int(round(x_longe)), y_longe),
-             (0, 255, 255), 2)
-
-    # Residuo do ajuste da reta: se for grande, os pontos nao estao alinhados
-    # (curva, ou outro objeto amarelo puxando a media).
-    xs_fit = coef_angular * np.array(ys_validos) + intercepto
-    DEBUG["residuo_fit_px"] = float(np.sqrt(np.mean((np.array(xs_validos) - xs_fit) ** 2)))
-    DEBUG["x_perto"] = x_perto
-    DEBUG["x_longe"] = x_longe
-
-    return vis_img, erro_lat_norm, theta_e
-
 LUT_LINEAR = (((np.arange(256) / 255.0) ** 2.2) * 255.0).astype(np.float32)   # desfaz o gama da camera
-ESTADO_VISAO = {"a": None, "b": None, "t": -1e9, "rho": deque(maxlen=5), "theta": deque(maxlen=5)}
-
+ESTADO_VISAO = {"modo": None, "a": None, "b": None, "t": -1e9, "rho": deque(maxlen=5), "theta": deque(maxlen=5)}
 
 def _amarelamento_linear(suave):
     """(R+G)/2 - B em luz linear: o reflexo soma branco igual nos 3 canais e nao muda este valor."""
@@ -412,17 +340,24 @@ def _linha_hough(mask_final, h, w, img_dbg):
         return None
     return -s_ / c_, rho_f / c_                  # x = a*y + b
 
-def vision_func(car, numero_tracos=6):
-    image = car.get_image(gray=False)
-    if image is None:
-        return None, None, None
+def _tira_manchas(mask, h):
+    """Apaga, linha a linha, trechos amarelos mais largos que a fita pode ser naquela linha.
+    Largura esperada da fita = K_LARGURA*(linha - horizonte) (calibracao da camera); aceita ate 2.5x
+    (fita inclinada ate ~66 graus da vertical). Mancha e larga; fita e estreita."""
+    limpa = mask.copy()
+    for y in range(int(h * LINHA_TOPO) - 5, h):
+        lim = 2.5 * max(3.0, K_LARGURA * (y - HORIZONTE_FRAC * h))
+        lin = np.concatenate([[0], (mask[y] > 0).astype(np.int8), [0]])
+        d = np.diff(lin)
+        ini, fim = np.where(d == 1)[0], np.where(d == -1)[0]
+        for a_, b_ in zip(ini, fim):
+            if b_ - a_ > lim:
+                limpa[y, a_:b_] = 0
+    return limpa
 
-    rgb = image if IMAGEM_RGB else cv2.cvtColor(image, cv2.COLOR_BGR2RGB)   # trabalha sempre em RGB
-    vis_img = rgb.copy()
-    h, w, _ = vis_img.shape
-    centro_x = w / 2.0      
-    etapas = {"1 entrada": rgb}
-
+def linha_func(rgb, car, etapas):
+    """MODO LINHA: tudo da linha amarela. Devolve a reta (a, b) de x = a*y + b, ou None."""
+    h, w, _ = rgb.shape
     suave = cv2.GaussianBlur(rgb, BLUR, 0)
     hsv = cv2.cvtColor(suave, cv2.COLOR_RGB2HSV)
     H = hsv[..., 0].astype(np.float32)
@@ -433,11 +368,10 @@ def vision_func(car, numero_tracos=6):
     score[hsv[..., 2] < 40] = 0                         # pixels escuros: matiz nao confiavel
     score = np.clip(score, 0, 255).astype(np.uint8)
     etapas["3 score amarelo"] = np.clip(score.astype(np.float32) * 3, 0, 255).astype(np.uint8)  # x3 so para ver
-
-    etapas["3 score amarelo"] = np.clip(score.astype(np.float32) * 3, 0, 255).astype(np.uint8)  # x3 so para ver
     mask = ((score >= LIMIAR_AMARELO) * 255).astype(np.uint8)
+    mask = _tira_manchas(mask, h)
 
-        # ---- CAMADA 2: completa a mascara onde o reflexo apagou a fita ----
+    # ---- CAMADA 2: completa a mascara onde o reflexo apagou a fita ----
     Y = _amarelamento_linear(suave)
     etapas["2 amarelo realcado (linear, anti-reflexo)"] = np.clip(Y * 6, 0, 255).astype(np.uint8)
     extra, ref = _recupera_fita(car, Y, mask, h, w)
@@ -446,11 +380,76 @@ def vision_func(car, numero_tracos=6):
     m_rgb[extra > 0] = (255, 0, 255)
     etapas["4 mascara (branco=cor, magenta=recuperada)"] = m_rgb
     DEBUG["recuperados_px"] = int(np.count_nonzero(extra))
+    DEBUG["mask"] = mask_final
 
-        # ---- identificacao da linha ----
+    # ---- identificacao da linha ----
     dbg = cv2.cvtColor(mask_final, cv2.COLOR_GRAY2RGB) // 2
     reta = _linha_hough(mask_final, h, w, dbg)
     etapas["5 identificacao da linha"] = dbg
+    return reta
+
+
+def cones_func(rgb, car, etapas):
+    """MODO CONES: cada cone pesa pela sua distancia (linha da base na imagem),
+    nao pela quantidade de pixels: e = (g - r) / (g + r)."""
+    h, w, _ = rgb.shape
+    hsv = cv2.cvtColor(cv2.GaussianBlur(rgb, BLUR, 0), cv2.COLOR_RGB2HSV)
+    H = hsv[..., 0].astype(np.float32)
+    S = hsv[..., 1].astype(np.float32)
+    y_hor = HORIZONTE_FRAC * h
+    vis_img = rgb.copy()
+    mask_total = np.zeros((h, w), np.uint8)
+    soma = {}
+    for nome, h_alvo, cor in (("r", H_CONE_VERMELHO, (255, 0, 0)), ("g", H_CONE_VERDE, (0, 255, 0))):
+        dh = np.abs(H - h_alvo)
+        dh = np.minimum(dh, 180.0 - dh)                  # vermelho fica em 0 e em 180
+        score = np.clip(1.0 - dh / 20.0, 0.0, 1.0) * S
+        score[hsv[..., 2] < 40] = 0
+        mask = ((score >= LIMIAR_CONE) * 255).astype(np.uint8)
+        mask[:int(y_hor) + 1] = 0                        # so o chao
+        mask_total |= mask
+        n, _, est, _ = cv2.connectedComponentsWithStats(mask)
+        soma[nome] = 0.0
+        for x, y, bw, bh, area in est[1:]:
+            if area < AREA_MIN_CONE:
+                continue
+            y_base = y + bh - 1                          # onde o cone toca o chao
+            soma[nome] += (y_base - y_hor)         # cone perto pesa mais (~1/distancia^2)
+            cv2.circle(vis_img, (int(x + bw / 2), int(y_base)), 5, cor, -1)
+
+    DEBUG["mask"] = mask_total
+    DEBUG["n_pontos"] = int(soma["r"] > 0) + int(soma["g"] > 0)
+    total = soma["r"] + soma["g"]
+    if total == 0:
+        return vis_img, None
+    e = (soma["g"] - soma["r"]) / total                  # carro real: (soma["r"] - soma["g"])
+    cv2.putText(vis_img, f"r={soma['r']:.0f} g={soma['g']:.0f} e={e:+.2f}", (8, h - 10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+    return vis_img, e
+
+def vision_func(car, numero_tracos=6):
+    image = car.get_image(gray=False)
+    if image is None:
+        return None, None, None
+
+    rgb = image if IMAGEM_RGB else cv2.cvtColor(image, cv2.COLOR_BGR2RGB)   # trabalha sempre em RGB
+    h, w, _ = rgb.shape
+    centro_x = w / 2.0
+    etapas = {"1 entrada": rgb}
+
+    modo = MODO_CONTROLE                       # le uma vez por quadro
+    if modo != ESTADO_VISAO["modo"]:           # trocou de modo: esquece a reta antiga
+        ESTADO_VISAO.update(modo=modo, a=None, b=None, t=-1e9)
+        ESTADO_VISAO["rho"].clear(); ESTADO_VISAO["theta"].clear()
+
+    match modo:
+        case "linha":
+            reta = linha_func(rgb, car, etapas)
+        case "cones":
+            vis_img, e = cones_func(rgb, car, etapas)
+            return _fim(vis_img, etapas, e, None if e is None else 0.0)   # theta = 0: so o erro lateral
+        case _:
+            raise ValueError(f"MODO_CONTROLE invalido: {modo}")
 
     # ---- CAMADA 3: segura a ultima reta ----
     DEBUG["segurando"] = 0
@@ -461,7 +460,6 @@ def vision_func(car, numero_tracos=6):
         reta = (ESTADO_VISAO["a"], ESTADO_VISAO["b"])
         DEBUG["segurando"] = 1
 
-    DEBUG["mask"] = mask_final
     DEBUG["img_w"] = w
     vis_img = rgb.copy()
     cv2.line(vis_img, (int(centro_x), int(h * LINHA_TOPO)), (int(centro_x), h - 1), (255, 255, 255), 1)
@@ -469,7 +467,6 @@ def vision_func(car, numero_tracos=6):
     if reta is None:
         return _fim(vis_img, etapas, None, None)
 
-    # ---- erros (mesma definicao nos dois metodos) ----
     a, b = reta
     y_perto, y_longe = int(h * LINHA_BASE), int(h * LINHA_TOPO)
     x_perto, x_longe = a * y_perto + b, a * y_longe + b
