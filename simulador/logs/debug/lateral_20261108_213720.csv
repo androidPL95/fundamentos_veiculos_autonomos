@@ -1,0 +1,4 @@
+t,v,x_real,y_real,th_real,e_real_m,th_real_err,steer_real,erro_visao,theta_visao_deg,termo_heading_deg,termo_lateral_deg,delta_bruto_deg,delta_cmd_deg,saturado,rate_limitado,n_pontos,contagem_min,largura_max_px,residuo_fit_px,x_perto,x_longe,img_w,xs,ys
+0.050,0.145,-3.0002,-8.4997,3.0487,0.5003,-5.323,0.000,-0.7035,29.417,nan,nan,nan,0.000,0,0,24,0,-1,nan,545.1,382.7,640,,
+0.100,0.013,-3.0005,-8.4995,3.0566,0.5005,-4.872,0.000,-0.6876,29.056,nan,nan,nan,0.000,0,0,23,0,-1,nan,540.0,380.0,640,,
+0.150,0.072,-2.9992,-8.4996,3.1326,0.5004,-0.515,0.000,-0.6818,28.979,nan,nan,nan,0.000,0,0,23,0,-1,nan,538.2,378.7,640,,
