@@ -14,7 +14,6 @@
 
 from collections import deque
 
-from fva_car import Car
 import numpy as np
 import cv2
 import csv
@@ -86,7 +85,7 @@ LIMIAR_SNR = 5.0         # quanto a fita precisa se destacar do piso (1e9 deslig
 HORIZONTE_FRAC = 0.106   # calibracao da camera: linha do horizonte / altura (51/480)
 K_LARGURA = 0.084        # calibracao: largura da fita (px) = K_LARGURA * (linha - horizonte)
 
-MODO_CONTROLE = "cones"  # "linha" ou "cones"
+MODO_CONTROLE = "cones"  # "linha", "cones" ou "cones_geometrico"
 
 H_CONE_VERMELHO = 0.0    # matiz dos cones vermelhos (OpenCV 0..180)
 H_CONE_VERDE = 72.0      # matiz dos cones verdes
@@ -509,6 +508,48 @@ def vision_loop(car, vision_data, vision_lock, stop_event):
 # ============================================================
 
 if __name__ == "__main__":
+
+    import argparse
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(description="Controle do veículo real FVA.")
+    parser.add_argument("--modo", choices=("linha", "cones", "cones_geometrico"), default=MODO_CONTROLE)
+    parser.add_argument("--calibracao", type=Path, help="JSON de calibração para cones_geometrico.")
+    parser.add_argument("--velocidade-cones", type=float, help="Referência do modo geométrico em m/s.")
+    camera_opts = parser.add_mutually_exclusive_group()
+    camera_opts.add_argument("--somente-visao", action="store_true", help="Abre a prévia sem instanciar o carro.")
+    camera_opts.add_argument("--capturar-calibracao", type=Path, metavar="IMAGEM",
+                             help="Salva um PNG da webcam para medir as marcas do piso.")
+    args = parser.parse_args()
+    MODO_CONTROLE = args.modo
+
+    if MODO_CONTROLE == "cones_geometrico":
+        import modo_cones_geometrico as geometrico
+
+        if args.capturar_calibracao is not None:
+            from fva_car.camera import Camera
+            geometrico.capturar_calibracao(Camera, args.capturar_calibracao)
+        else:
+            caminho = args.calibracao or geometrico.CALIBRACAO_PADRAO
+            try:
+                config = geometrico.configurar(args.velocidade_cones)
+                calibracao = geometrico.Calibracao.carregar(caminho, config)
+            except (OSError, ValueError) as exc:
+                parser.error(f"Calibração ou parâmetros de cones ({caminho}): {exc}")
+            print(f"Calibração {calibracao.resolucao} | alcance {calibracao.alcance:.2f} m | "
+                  f"erro máximo {calibracao.erro_px:.1f} px", flush=True)
+            if args.somente_visao:
+                from fva_car.camera import Camera
+                geometrico.previa(Camera, calibracao, config)
+            else:
+                from fva_car.car import CAR, Car
+                geometrico.executar(Car, CAR, parameters, calibracao, config)
+        raise SystemExit(0)
+
+    if args.calibracao is not None or args.velocidade_cones is not None or args.somente_visao or args.capturar_calibracao:
+        parser.error("Os ajustes de calibração e prévia exigem --modo cones_geometrico.")
+
+    from fva_car import Car
 
     car = Car(parameters)
 
