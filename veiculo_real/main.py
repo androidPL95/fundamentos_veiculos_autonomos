@@ -20,12 +20,47 @@ import csv
 import os
 import time
 import threading
-import matplotlib.pyplot as plt
 
 
 # ============================================================
-# PARAMETROS GERAIS
+# AJUSTES PARA O ENSAIO
 # ============================================================
+
+# A GUI executa python3 -u main.py. Para mudar o padrão, edite esta linha.
+# O argumento --modo permite escolher outro modo para uma execução.
+MODO_CONTROLE = "cones"  # "linha", "cones" ou "cones_geometrico"
+ARQUIVO_CALIBRACAO_CONES = "calibracao_cones.json"  # ao lado deste arquivo
+
+# Usado só por cones_geometrico. --ajuste nome=valor sobrescreve estes valores.
+PARAMETROS_CONES = {
+    # Tração
+    "velocidade": 0.25,          # m/s com duas bordas
+    "fator_uma_borda": 0.7,      # fração da velocidade com uma só borda
+    "kp_vel": 0.5,              # ganho do erro de velocidade
+    "kd_vel": 0.25,             # amortecimento pela aceleração medida
+    "tau_vel": 0.45,            # s, suavização da referência de velocidade
+
+    # Direção e escolha do alvo
+    "antecipacao_m": 0.9,       # m ao longo do caminho estimado
+    "ganho_direcao": 1.0,       # multiplicador do ângulo do Pure Pursuit
+    "sinal_esterco": 1,         # confira o sinal com as rodas suspensas
+    "limite_direcao": 5.0,      # graus
+    "taxa_direcao": 25.0,       # graus/s
+
+    # Câmera e memória
+    "esquerda": "verde",        # cor da borda esquerda na pista real
+    "alcance_m": 3.0,           # m, limitado também pelas marcas de calibração
+    "saturacao_min": 65,        # canal S do HSV, de 0 a 255
+    "brilho_min": 24,           # canal V do HSV, de 0 a 255
+    "area_min": 12,             # pixels, área mínima da mancha
+    "memoria_s": 0.75,          # s para manter um cone já visto
+    "raio_associacao_m": 0.22,  # m, tolerância para reconhecer o mesmo cone
+    "peso_medicao": 0.45,       # peso da nova posição na memória
+
+    # Validade do alvo
+    "alvo_valido_s": 0.25,      # s de alvo válido para partir ou retomar
+    "idade_max_quadro_s": 0.25, # s, idade máxima da imagem para atuar
+}
 
 parameters = {
     "ts": 60.0,
@@ -84,8 +119,6 @@ HOUGH_VOTOS = 50         # votos minimos do HoughLines (so no metodo "hough")
 LIMIAR_SNR = 5.0         # quanto a fita precisa se destacar do piso (1e9 desliga)
 HORIZONTE_FRAC = 0.106   # calibracao da camera: linha do horizonte / altura (51/480)
 K_LARGURA = 0.084        # calibracao: largura da fita (px) = K_LARGURA * (linha - horizonte)
-
-MODO_CONTROLE = "cones"  # "linha", "cones" ou "cones_geometrico"
 
 H_CONE_VERMELHO = 0.0    # matiz dos cones vermelhos (OpenCV 0..180)
 H_CONE_VERDE = 72.0      # matiz dos cones verdes
@@ -516,7 +549,11 @@ if __name__ == "__main__":
     parser.add_argument("--modo", choices=("linha", "cones", "cones_geometrico"), default=MODO_CONTROLE)
     parser.add_argument("--calibracao", type=Path, help="JSON de calibração para cones_geometrico.")
     parser.add_argument("--velocidade-cones", type=float, help="Referência do modo geométrico em m/s.")
+    parser.add_argument("--ajuste", action="append", default=[], metavar="NOME=VALOR",
+                        help="Sobrescreve um valor de PARAMETROS_CONES neste ensaio. Pode repetir a opção.")
     camera_opts = parser.add_mutually_exclusive_group()
+    camera_opts.add_argument("--mostrar-ajustes", action="store_true",
+                             help="Mostra os valores efetivos de cones_geometrico e encerra.")
     camera_opts.add_argument("--somente-visao", action="store_true", help="Abre a prévia sem instanciar o carro.")
     camera_opts.add_argument("--capturar-calibracao", type=Path, metavar="IMAGEM",
                              help="Salva um PNG da webcam para medir as marcas do piso.")
@@ -524,15 +561,27 @@ if __name__ == "__main__":
     MODO_CONTROLE = args.modo
 
     if MODO_CONTROLE == "cones_geometrico":
-        import modo_cones_geometrico as geometrico
+        try:
+            import modo_cones_geometrico as geometrico
+        except ModuleNotFoundError as exc:
+            if exc.name not in ("modo_cones_geometrico", "visao_cones_geometrico"):
+                raise
+            parser.error("Envie modo_cones_geometrico.py e visao_cones_geometrico.py ao lado do main.py.")
 
-        if args.capturar_calibracao is not None:
+        try:
+            config = geometrico.configurar(PARAMETROS_CONES, args.ajuste, args.velocidade_cones)
+        except ValueError as exc:
+            parser.error(str(exc))
+
+        if args.mostrar_ajustes:
+            import json
+            print(json.dumps(config, indent=2, ensure_ascii=False))
+        elif args.capturar_calibracao is not None:
             from fva_car.camera import Camera
             geometrico.capturar_calibracao(Camera, args.capturar_calibracao)
         else:
-            caminho = args.calibracao or geometrico.CALIBRACAO_PADRAO
+            caminho = args.calibracao or Path(__file__).resolve().parent / ARQUIVO_CALIBRACAO_CONES
             try:
-                config = geometrico.configurar(args.velocidade_cones)
                 calibracao = geometrico.Calibracao.carregar(caminho, config)
             except (OSError, ValueError) as exc:
                 parser.error(f"Calibração ou parâmetros de cones ({caminho}): {exc}")
@@ -546,9 +595,11 @@ if __name__ == "__main__":
                 geometrico.executar(Car, CAR, parameters, calibracao, config)
         raise SystemExit(0)
 
-    if args.calibracao is not None or args.velocidade_cones is not None or args.somente_visao or args.capturar_calibracao:
-        parser.error("Os ajustes de calibração e prévia exigem --modo cones_geometrico.")
+    if (args.calibracao is not None or args.velocidade_cones is not None or args.somente_visao
+            or args.capturar_calibracao or args.ajuste or args.mostrar_ajustes):
+        parser.error("Os ajustes do ensaio geométrico exigem --modo cones_geometrico.")
 
+    import matplotlib.pyplot as plt
     from fva_car import Car
 
     car = Car(parameters)

@@ -1,4 +1,4 @@
-"""Modo geométrico do veículo real. Usa câmera USB, odometria e a interface Car."""
+"""Executa o modo geométrico do veículo real. Os ajustes ficam em main.py."""
 
 import csv
 from dataclasses import dataclass
@@ -14,24 +14,6 @@ import numpy as np
 from visao_cones_geometrico import ConeLocal, MemoriaCones, ProjecaoSolo, detectar, planejar, projetar
 
 
-PARAMETROS = {
-    "velocidade": 0.25,        # m/s de referência
-    "fator_uma_borda": 0.7,
-    "kp_vel": 0.5, "kd_vel": 0.25, "tau_vel": 0.45,
-    "ganho_direcao": 1.0, "sinal_esterco": 1,
-    "limite_direcao": 5.0,     # graus
-    "taxa_direcao": 25.0,      # graus/s
-    "alvo_valido_s": 0.25,
-    "idade_max_quadro_s": 0.25,
-    "antecipacao_m": 0.9,
-    "alcance_m": 3.0,
-    "esquerda": "verde",
-    "saturacao_min": 65, "brilho_min": 24, "area_min": 12,
-    "memoria_s": 0.75,
-    "raio_associacao_m": 0.22,
-    "peso_medicao": 0.45,
-}
-CALIBRACAO_PADRAO = Path(__file__).with_name("calibracao_cones.json")
 CORES = {"vermelho": (80, 95, 255), "verde": (90, 230, 120)}
 AZUL = (255, 216, 75)
 CAMPOS = (
@@ -41,8 +23,23 @@ CAMPOS = (
 )
 
 
-def configurar(velocidade=None):
-    config = PARAMETROS.copy()
+def configurar(padrao, ajustes=(), velocidade=None):
+    config = padrao.copy()
+    inteiros = ("sinal_esterco", "saturacao_min", "brilho_min", "area_min")
+    for ajuste in ajustes:
+        nome, separador, valor = ajuste.partition("=")
+        if not separador or nome not in padrao or not valor.strip():
+            raise ValueError(f"Ajuste inválido {ajuste!r}. Use um nome de PARAMETROS_CONES, como velocidade=0.25.")
+        try:
+            valor = valor.strip()
+            if nome == "esquerda":
+                config[nome] = valor
+            elif nome in inteiros:
+                config[nome] = int(valor)
+            else:
+                config[nome] = float(valor)
+        except ValueError as exc:
+            raise ValueError(f"Valor inválido para {nome}: {valor!r}.") from exc
     if velocidade is not None:
         config["velocidade"] = velocidade
     for chave in ("velocidade", "tau_vel", "limite_direcao", "taxa_direcao", "idade_max_quadro_s",

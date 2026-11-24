@@ -55,6 +55,28 @@ CAR_ICON = "🚗 "
 
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
+
+def arquivos_para_envio(selecao):
+	"""Inclui os módulos de cones ao enviar o main.py do veículo real."""
+	arquivos = []
+	vistos = set()
+	for caminho in selecao:
+		companheiros = ()
+		if os.path.basename(caminho) == "main.py":
+			pasta = os.path.dirname(caminho)
+			modulos = tuple(os.path.join(pasta, nome) for nome in (
+				"visao_cones_geometrico.py", "modo_cones_geometrico.py",
+			))
+			if any(os.path.isfile(modulo) for modulo in modulos):
+				companheiros = modulos
+		for arquivo in (*companheiros, caminho):
+			chave = os.path.normcase(os.path.abspath(arquivo))
+			if chave not in vistos:
+				vistos.add(chave)
+				arquivos.append(arquivo)
+	return arquivos
+
+
 def parse_telemetry_line(line: str):
 	"""Converte uma linha DATA no protocolo oficial da telemetria FVA.
 
@@ -1665,7 +1687,8 @@ class RsyncGUI(tk.Tk):
 			self.ui(self.log_write, "⚠️ Nenhum arquivo ou pasta selecionado.")
 			return
 
-		missing = [p for p in self.selected_files if not os.path.exists(p)]
+		arquivos = arquivos_para_envio(self.selected_files)
+		missing = [p for p in arquivos if not os.path.exists(p)]
 		if missing:
 			self.ui(self.log_write, "❌ Itens inexistentes:")
 			for item in missing:
@@ -1682,7 +1705,7 @@ class RsyncGUI(tk.Tk):
 				sftp = client.open_sftp()
 				self._sftp_mkdir_p(sftp, dest)
 
-				for path in self.selected_files:
+				for path in arquivos:
 					if os.path.isdir(path):
 						# Mesmo comportamento do antigo rsync com barra final:
 						# envia o CONTEÚDO da pasta para o destino.
